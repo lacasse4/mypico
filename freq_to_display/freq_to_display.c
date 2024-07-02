@@ -19,12 +19,12 @@
 #include <math.h>
 #include "pico/stdlib.h"
 #include "hardware/gpio.h"
-#include "pico/binary_info.h"
 #include "hardware/i2c.h"
 
-// Define MCP23018 registers 
+// MCP23018 address 
 #define I2C_ADDRESS 0x20
 
+// MCP23018 registers 
 #define IODIRA   0x00  // IO direction A - 1= input 0 = output
 #define IODIRB   0x01  // IO direction B - 1= input 0 = output    
 #define IPOLA    0x02  // Input polarity A
@@ -47,8 +47,8 @@
 #define OLATA    0x14  // Output latches A
 #define OLATB    0x15  // Output latches B
 
-
-#define LEN 10  // number of falling edges counted to evaluate PIN_IRQ frequency
+// number of falling edges counted to evaluate PIN_IRQ frequency
+#define LEN 10  
 
 #define MAX_FREQ    400         // in Hz
 #define MIN_FREQ    75          // in Hz
@@ -56,21 +56,25 @@
 #define MAX_PERIOD_US  (LEN*TIMER_FREQ/MIN_FREQ)
 #define MIN_PERIOD_US  (LEN*TIMER_FREQ/MAX_FREQ)
 
-#define SLEEP_TIME_MS 200  // must be physicaly greater than MAX_PERIOD_US
+#define SLEEP_TIME_MS 200  // must be physically greater than MAX_PERIOD_US
 #if SLEEP_TIME_MS*1000 <= MAX_PERIOD_US
-    #warning SLEEP_TIME_MS must be greater than MAX_PERIOD_US
+    #warning SLEEP_TIME_MS must be physically greater than MAX_PERIOD_US
 #endif
 
+// variables used for the indicator LED
 const uint LED_PIN = PICO_DEFAULT_LED_PIN;
-const uint PIN_IRQ = 14;
 static bool led_on = true;
 
+// variables used in the interrupt handler
+const uint PIN_IRQ = 14;
 static volatile bool first = false;
 static volatile bool done  = true;
-static uint32_t start;
-static uint32_t period;
-static int counter;
+static volatile uint32_t start;
+static volatile uint32_t period;
+static volatile int counter;
 
+// Interrupt handler on PIN_IRQ
+// This routine evaluates the period taken by PIN_IRQ to perform LEN falling egdes.
 void gpio_callback(uint gpio, uint32_t events) 
 {
     uint32_t value = time_us_32();
@@ -90,6 +94,7 @@ void gpio_callback(uint gpio, uint32_t events)
     }
 }
 
+// Setup interrupt routine on PIN_IRQ
 void init_irq() 
 {
     gpio_set_input_enabled (PIN_IRQ, true);
@@ -97,6 +102,7 @@ void init_irq()
     gpio_set_irq_enabled_with_callback(PIN_IRQ, GPIO_IRQ_EDGE_FALL, true, &gpio_callback);
 }
 
+// Start a single evaluatio of 'period'
 void start_search_safe() 
 {
     gpio_set_irq_enabled (PIN_IRQ, GPIO_IRQ_EDGE_FALL, false);
@@ -107,6 +113,7 @@ void start_search_safe()
     gpio_set_irq_enabled (PIN_IRQ, GPIO_IRQ_EDGE_FALL, true);
 }
 
+// Inititialize indicator LED
 void init_led() 
 {
     gpio_init(LED_PIN);
@@ -114,6 +121,7 @@ void init_led()
     gpio_put(LED_PIN, 1);
 }
 
+// Toggle indicator LED
 void toggle_led() 
 {
     if (led_on) gpio_put(LED_PIN, 0);
@@ -121,6 +129,7 @@ void toggle_led()
     led_on = !led_on;
 }
 
+// Initialize i2c communication with MCP32018
 void init_i2c() 
 {
     int ret;
@@ -154,6 +163,7 @@ void init_i2c()
     // printf("write iodira data ret= %d\n", ret);
 }
 
+// Refresh the MCP23018 with new ouput values
 void refresh_i2c_display(uint16_t value) 
 {
     int ret;
@@ -167,6 +177,7 @@ void refresh_i2c_display(uint16_t value)
     ret = i2c_write_blocking (i2c_default, I2C_ADDRESS, data, 2, false);
 }
 
+// Convert frequency to a single bit display for the MCP23018
 uint16_t frequency_to_display(double frequency) 
 {
     int shift = (int)round(frequency-200.0) + 7;
@@ -184,20 +195,19 @@ int main() {
     sleep_ms(5000);
     printf("\nfreq_to_display\n");
 
-    init_led();
+    init_led();     // Inititialize indicator LED
 
-    init_i2c();
+    init_i2c();     // Initialize i2c communication with MCP32018
 
-    init_irq();
+    init_irq();     // Setup interrupt routine on PIN_IRQ
 
-    // Wait forever
     while (true) {
-        start_search_safe();
+        start_search_safe();    // Start a single evaluation of 'period'
 
-        toggle_led();
+        toggle_led();           // Toggle indicator LED
 
-        // wait some time to compute period
-        // the wait time must be longer than the time for detecting the lower frequency 
+        // Wait some time to compute input waveform period.
+        // SLEEP_TIME must be greater than the time required to detect the lowest frequency (MAX_PERIOD)
         sleep_ms(SLEEP_TIME_MS);
 
         if (done) {
