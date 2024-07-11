@@ -45,8 +45,8 @@ pico_set_program_name(freq_to_display "freq_to_display")
 pico_set_program_version(freq_to_display "0.1")
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(freq_to_display 0)
-pico_enable_stdio_usb(freq_to_display 1)
+pico_enable_stdio_uart(freq_to_display 1)
+pico_enable_stdio_usb(freq_to_display 0)
 
 # Add the standard library to the build
 target_link_libraries(freq_to_display hardware_i2c
@@ -59,3 +59,5 @@ target_include_directories(freq_to_display PRIVATE
 )
 
 pico_add_extra_outputs(freq_to_display)
+
+set(CMAKE_BUILD_TYP Debug)
