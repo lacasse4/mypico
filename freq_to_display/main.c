@@ -30,6 +30,7 @@
 #define I2C_ADDRESS_0 0x20  // pin 15 to GND
 #define I2C_ADDRESS_1 0x21  // pin 15 set with voltage divider R1=20K, R2=4.7K, VDD=3.3V (see specs) 
 #define I2C_ADDRESS_2 0x27  // pin 15 set to VDD
+#define STOP() while(1)
 
 // MCP23018 registers 
 #define IODIRA   0x00  // IO direction A - 1= input 0 = output
@@ -61,22 +62,29 @@
 // number of falling edges counted to evaluate PIN_IRQ frequency
 #define LEN 10  
 
+// frequency detection parameters
 #define MAX_FREQ    400         // in Hz
 #define MIN_FREQ    75          // in Hz
 #define TIMER_FREQ  1000000     // in Hz
 #define MAX_PERIOD_US  (LEN*TIMER_FREQ/MIN_FREQ)
 #define MIN_PERIOD_US  (LEN*TIMER_FREQ/MAX_FREQ)
-
 #define SLEEP_TIME_MS 200  // must be physically greater than MAX_PERIOD_US
 #if SLEEP_TIME_MS*1000 <= MAX_PERIOD_US
     #warning SLEEP_TIME_MS must be physically greater than MAX_PERIOD_US
 #endif
 
+// frequency detection codes
+#define FREQ_VALID       0
+#define FREQ_TO_HIGH    -1
+#define FREQ_TO_LOW     -2
+#define FREQ_NO_SIGNAL  -3
+
+// tuner constants
 #define NUM_STRING      6           // number of strings on musical instrument
 #define BASE_FREQUENCY  220.0       // base frequency used to calculate cents
 #define FREQ_BAR_GRAPH_NUM_LED 15   // number of leds on frequency bargraph (should be a odd number)
-#define FREQ_BAR_GRAPH_COARSE_PREC 0.1  // frequency bar graph coarse precision
-#define FREQ_BAR_GRAPH_FINE_PREC   1.0  // frequency bar graph fine precision
+#define FREQ_BAR_GRAPH_COARSE_PREC (1.0/30.0)  // frequency bar graph coarse precision
+#define FREQ_BAR_GRAPH_FINE_PREC   1.0         // frequency bar graph fine precision
 
 double string_cents[NUM_STRING];   // strings cents from BASE_FREQUENCY
 
@@ -162,8 +170,31 @@ void init_i2c()
     gpio_pull_up(PICO_DEFAULT_I2C_SCL_PIN);
 }
 
+// Output bit_pattern to the bargraph
+// LSB corresponds to the first LED at the left.
+int set_bargraph(uint8_t address, uint16_t bit_pattern) 
+{
+    int ret;
+    uint8_t opcode;
+    uint8_t data[2];
+
+    bit_pattern = ~bit_pattern;  // a bit value of 0 turn on the led.
+
+    opcode = GPIOA;
+    data[0] = (uint8_t)(bit_pattern & 0x00FF);
+    data[1] = (uint8_t)((bit_pattern >> 8) & 0x00FF);
+
+    ret = i2c_write_blocking (i2c_default, address, &opcode, 1, true);
+    if (ret < 0) return ERROR_WRITE_TO_I2C;
+    ret = i2c_write_blocking (i2c_default, address, data, 2, false);
+    if (ret < 0) return ERROR_WRITE_TO_I2C;
+
+    return NO_ERROR;
+}
+
 // Initialize a MCP23018 at the specified I2C address
-// All pins are configured as outputs
+// Configure all pins as outputs
+// Set all outputs to high so the LEDS are off on power up.
 int init_MCP28018(uint8_t address) 
 {
     int ret;
@@ -189,28 +220,9 @@ int init_MCP28018(uint8_t address)
     ret = i2c_write_blocking (i2c_default, address, data, 2, false);
     if (ret < 0) return ERROR_WRITE_TO_I2C;
 
-    return NO_ERROR;
-}
-
-// Output bit_pattern to the bargraph
-// LSB corresponds to the first LED at the left.
-int set_bargraph(uint8_t address, uint16_t bit_pattern) 
-{
-    int ret;
-    uint8_t opcode;
-    uint8_t data[2];
-
-    bit_pattern = ~bit_pattern;  // a bit value of 0 turn on the led.
-
-    opcode = GPIOA;
-    data[0] = (uint8_t)(bit_pattern & 0x00FF);
-    data[1] = (uint8_t)((bit_pattern >> 8) & 0x007F);
-
-    ret = i2c_write_blocking (i2c_default, address, &opcode, 1, true);
+    // init outputs to high state.
+    ret = set_bargraph(address, 0);
     if (ret < 0) return ERROR_WRITE_TO_I2C;
-    ret = i2c_write_blocking (i2c_default, address, data, 2, false);
-    if (ret < 0) return ERROR_WRITE_TO_I2C;
-
     return NO_ERROR;
 }
 
@@ -276,7 +288,7 @@ int find_nearest_frequency(double cents)
 
 
 int main() {
-    int string;
+    int string, status, freq_code;
     double frequency, cents, cents_delta;
 
     stdio_init_all();
@@ -289,11 +301,23 @@ int main() {
     init_i2c();     
 
     // Initialize MCP23018 chips
-    init_MCP28018(I2C_ADDRESS_0);
-    init_MCP28018(I2C_ADDRESS_1);
-    init_MCP28018(I2C_ADDRESS_2);
+    status = init_MCP28018(I2C_ADDRESS_0);
+    if (status == ERROR_WRITE_TO_I2C) {
+        printf("Error writinf to I2C address %x2\n", I2C_ADDRESS_0);
+        STOP();
+    }
+    status = init_MCP28018(I2C_ADDRESS_1);
+    if (status == ERROR_WRITE_TO_I2C) {
+        printf("Error writinf to I2C address %x2\n", I2C_ADDRESS_1);
+        STOP();
+    }
+    status = init_MCP28018(I2C_ADDRESS_2);
+    if (status == ERROR_WRITE_TO_I2C) {
+        printf("Error writinf to I2C address %x2\n", I2C_ADDRESS_1);
+        STOP();
+    }
 
-    // Initialize string frequencies 
+    // Initialize cents array 
     init_cents();
 
     // Setup interrupt routine on PIN_IRQ
@@ -314,28 +338,47 @@ int main() {
         if (done) {
             frequency = LEN * 1000000.0 / period;
             if (frequency > MAX_FREQ) {
-                printf("Too high   \r");
+                freq_code = FREQ_TO_HIGH;
             }
             else if (frequency < MIN_FREQ) {
-                printf("Too low    \r");
+                freq_code = FREQ_TO_LOW;
             }
             else {
+                freq_code = FREQ_VALID;
                 cents = get_cents(frequency);
                 string = find_nearest_frequency(cents);
                 cents_delta = cents - string_cents[string];
                 show_cents(I2C_ADDRESS_0, cents_delta, FREQ_BAR_GRAPH_COARSE_PREC);
                 show_cents(I2C_ADDRESS_1, cents_delta, FREQ_BAR_GRAPH_FINE_PREC);
                 set_bargraph(I2C_ADDRESS_2, 1<<string);
-                printf(" %8.2f  %d  %8.2f  %8.2f     \r", frequency, string, cents, cents_delta);
             } 
         }
         else {
             if (first) {
-                printf("No signal  \r");
+                freq_code = FREQ_NO_SIGNAL;
             }
             else {
-                printf("Too low    \r");
+                freq_code = FREQ_TO_LOW;
             }
+        }
+
+        // printed message to UART
+        switch (freq_code) {
+            case FREQ_VALID:
+                printf(" %8.2f  %d  %8.2f  %8.2f     \r", frequency, string, cents, cents_delta);
+                break;
+
+            case FREQ_NO_SIGNAL:
+                printf("No signal  \r");
+                break;
+
+            case FREQ_TO_LOW:
+                printf("Too low    \r");
+                break;
+
+            case FREQ_TO_HIGH:
+                printf("Too high   \r");
+                break;
         }
     }
 }
