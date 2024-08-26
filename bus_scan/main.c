@@ -1,7 +1,7 @@
 /**
- * Copyright (c) 2020 Raspberry Pi (Trading) Ltd.
- *
- * SPDX-License-Identifier: BSD-3-Clause
+ * bus_scan.c
+ * 
+ * From pico-examples
  */
 
 // Sweep through all 7-bit I2C addresses, to see if any slaves are present on
@@ -34,7 +34,6 @@ bool reserved_addr(uint8_t addr) {
 int main() {
     // Enable UART so we can print status output
     stdio_init_all();
-    sleep_ms(5000);
 
 #if !defined(i2c_default) || !defined(PICO_DEFAULT_I2C_SDA_PIN) || !defined(PICO_DEFAULT_I2C_SCL_PIN)
 #warning i2c/bus_scan example requires a board with I2C pins
@@ -74,9 +73,20 @@ int main() {
             printf(ret < 0 ? "." : "@");
             printf(addr % 16 == 15 ? "\n" : "  ");
         }
-        sleep_ms(100);
+        sleep_ms(500);
         printf("\033[2J\n"); // clear screen
     }
+
+
+    // while(1) {
+
+    //     for (int addr = 0; addr < (1 << 7); ++addr) {
+    //         uint8_t rxdata;
+    //         if (!reserved_addr(addr))
+    //             i2c_read_blocking(i2c_default, addr, &rxdata, 1, false);
+    //     }
+    // }
+
     return 0;
 #endif
 }
