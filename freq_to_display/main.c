@@ -78,6 +78,8 @@
 #define FREQ_TO_HIGH    -1
 #define FREQ_TO_LOW     -2
 #define FREQ_NO_SIGNAL  -3
+#define LED_FOR_TO_LOW   0x001F  // first 5 LEDs from the left
+#define LED_FOR_TO_HIGH  0x7C00  // first 5 LEDs from the right
 
 // tuner constants
 #define NUM_STRING      6           // number of strings on musical instrument
@@ -91,6 +93,7 @@ double string_cents[NUM_STRING];   // strings cents from BASE_FREQUENCY
 // variables used to switch the Pico on board LED (alive signal)
 const uint LED_PIN = PICO_DEFAULT_LED_PIN;
 static bool led_on = true;
+int freq_code = FREQ_NO_SIGNAL;
 
 // variables used in the interrupt handler
 const uint PIN_IRQ = 14;
@@ -141,22 +144,6 @@ void arm_handler_safe()
     period = 0;
     counter = 0;
     gpio_set_irq_enabled (PIN_IRQ, GPIO_IRQ_EDGE_FALL, true);
-}
-
-// Inititialize Pico on board LED
-void init_led() 
-{
-    gpio_init(LED_PIN);
-    gpio_set_dir(LED_PIN, GPIO_OUT);
-    gpio_put(LED_PIN, 1);
-}
-
-// Toggle Pico on board LED
-void toggle_led() 
-{
-    if (led_on) gpio_put(LED_PIN, 0);
-    else        gpio_put(LED_PIN, 1);
-    led_on = !led_on;
 }
 
 // Initialize i2c communication
@@ -226,6 +213,31 @@ int init_MCP28018(uint8_t address)
     return NO_ERROR;
 }
 
+// Inititialize Pico on board LED
+void init_led() 
+{
+    gpio_init(LED_PIN);
+    gpio_set_dir(LED_PIN, GPIO_OUT);
+    gpio_put(LED_PIN, 1);
+}
+
+// Toggle Pico on board LED
+void toggle_led() 
+{
+    if (led_on) {
+        gpio_put(LED_PIN, 0);
+        if (freq_code == FREQ_TO_LOW)  set_bargraph(I2C_ADDRESS_1, 0);
+        if (freq_code == FREQ_TO_HIGH) set_bargraph(I2C_ADDRESS_1, 0);
+    }
+    else {
+        gpio_put(LED_PIN, 1);
+        if (freq_code == FREQ_TO_LOW)  set_bargraph(I2C_ADDRESS_1, LED_FOR_TO_LOW);
+        if (freq_code == FREQ_TO_HIGH) set_bargraph(I2C_ADDRESS_1, LED_FOR_TO_HIGH);
+    }
+    led_on = !led_on;
+}
+
+
 // Show cents value on a LED bargraph
 //   address   - I2C address of the MCP23018 driving the bar graph
 //   cents     - relative cent value displayed on the bar graph
@@ -288,7 +300,7 @@ int find_nearest_frequency(double cents)
 
 
 int main() {
-    int string, status, freq_code;
+    int string, status;
     double frequency, cents, cents_delta;
 
     stdio_init_all();
@@ -345,12 +357,6 @@ int main() {
             }
             else {
                 freq_code = FREQ_VALID;
-                cents = get_cents(frequency);
-                string = find_nearest_frequency(cents);
-                cents_delta = cents - string_cents[string];
-                show_cents(I2C_ADDRESS_0, cents_delta, FREQ_BAR_GRAPH_COARSE_PREC);
-                show_cents(I2C_ADDRESS_1, cents_delta, FREQ_BAR_GRAPH_FINE_PREC);
-                set_bargraph(I2C_ADDRESS_2, 1<<string);
             } 
         }
         else {
@@ -365,10 +371,19 @@ int main() {
         // printed message to UART
         switch (freq_code) {
             case FREQ_VALID:
+                cents = get_cents(frequency);
+                string = find_nearest_frequency(cents);
+                cents_delta = cents - string_cents[string];
+                show_cents(I2C_ADDRESS_0, cents_delta, FREQ_BAR_GRAPH_COARSE_PREC);
+                show_cents(I2C_ADDRESS_1, cents_delta, FREQ_BAR_GRAPH_FINE_PREC);
+                set_bargraph(I2C_ADDRESS_2, 1<<string);
                 printf(" %8.2f  %d  %8.2f  %8.2f     \r", frequency, string, cents, cents_delta);
                 break;
 
             case FREQ_NO_SIGNAL:
+                set_bargraph(I2C_ADDRESS_0, 0);
+                set_bargraph(I2C_ADDRESS_1, 0);
+                set_bargraph(I2C_ADDRESS_2, 0);
                 printf("No signal  \r");
                 break;
 
