@@ -377,7 +377,7 @@ int main() {
                 show_cents(I2C_ADDRESS_0, cents_delta, FREQ_BAR_GRAPH_COARSE_PREC);
                 show_cents(I2C_ADDRESS_1, cents_delta, FREQ_BAR_GRAPH_FINE_PREC);
                 set_bargraph(I2C_ADDRESS_2, 1<<string);
-                printf(" %8.2f  %d  %8.2f  %8.2f     \r", frequency, string, cents, cents_delta);
+                printf(" %8.2f  %d  %8.2f  %8.2f             \r", frequency, string, cents, cents_delta);
                 break;
 
             case FREQ_NO_SIGNAL:
