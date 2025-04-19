@@ -87,10 +87,10 @@
 #define PEAK_FOUND              3
 
 #define VALID        0
-#define NO_PEAK     -1
-#define TOO_HIGH    -2
-#define TOO_LOW     -3
+#define INVALID     -1
 
+uint32_t start_time;
+uint32_t gap;
 
 // prototypes
 int init_data_acquisition(uint *dma_chan, dma_channel_config *cfg);
@@ -116,27 +116,20 @@ int main()
 
     while (1) 
     {
+        start_time = time_us_32();
+
         get_signal(dma_chan, &cfg, signal);
 
         status = measure_frequency(signal, &frequency);
 
+        gap = time_us_32() - start_time;
+
         // Print measured frequency if valid
-        switch(status) {
-            case VALID:
-            printf(" %6.2f\n", frequency);
-            break;
-
-            case NO_PEAK:
-            printf(" NO PEAK\n");
-            break;
-
-            case TOO_LOW:
-            printf(" TOO LOW\n");
-            break;
-
-            case TOO_HIGH:
-            printf(" TOO HIGH\n");
-            break;
+        if (status == VALID) {
+            printf(" %7.2f  %lu\n", frequency, gap);
+        }
+        else {
+            printf("          %lu\n", gap);
         }
     }
 }
@@ -159,7 +152,7 @@ int init_data_acquisition(uint *dma_chan, dma_channel_config *cfg)
         true,    // Write each completed conversion to the sample FIFO
         true,    // Enable DMA data request (DREQ)
         1,       // DREQ (and IRQ) asserted when at least 1 sample present
-        false,   // We won't see the ERR bit because of 8 bit reads; disable.
+        false,   // ERR bit disabled
         false    // Do not shift each sample 
     );
 
@@ -260,6 +253,7 @@ int acorr_find_first_peak(int16_t *signal, float *acorr, int* index)
     int64_t previous_sum;
     int64_t threshold;
     
+    *index = 0;
     state = SET_THRESHOLD;
     sum = 0;
     sum_at_index0 = 1000;  // arbritary starting value, will be overwritten.
@@ -302,12 +296,11 @@ int acorr_find_first_peak(int16_t *signal, float *acorr, int* index)
     }
 
     if (state == PEAK_FOUND) {
-        if (i < MIN_COUNT)  return TOO_HIGH;
-        if (i >= MAX_COUNT) return TOO_LOW;
         *index = i - 1;
+        if (*index < MIN_COUNT) return INVALID;
         return VALID;
     }
-    return NO_PEAK;
+    return INVALID;
 }
 
 
