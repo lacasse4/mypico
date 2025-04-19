@@ -61,34 +61,95 @@
  */
 #define SIGNAL_LEN  1024
 
-#define THRESHOLD_FACTOR        0.75
+// maximum and minimum detection frequencies
+#define MAX_FREQ    400     // in Hz
+#define MIN_FREQ    35      // in Hz
+
+// peak detection search limits in signal autocorrelation
+#define MIN_COUNT   (SAMPLING_FREQUENCY/MAX_FREQ)
+#define MAX_COUNT   (SAMPLING_FREQUENCY/MIN_FREQ)
+
+// variable thresholds and limits for peak detection
+// i.e. I have observed that the detection threshold should be 
+// set at a lower value when seaching lower frequency.
+// These values were set empirically.
+#define HIGH_THRES      0.80
+#define MID_THRES       0.60
+#define LOW_THRES       0.40
+#define MID_MAX_FREQ    190     // in Hz
+#define LOW_MAX_FREQ    100     // in Hz
+#define MID_MIN_COUNT   (SAMPLING_FREQUENCY/MID_MAX_FREQ)
+#define LOW_MIN_COUNT   (SAMPLING_FREQUENCY/LOW_MAX_FREQ)
+
 #define SET_THRESHOLD           0
 #define SEARCH_UP_AND_EXCEEDED  1
 #define SEARCH_DOWN             2
 #define PEAK_FOUND              3
 
-#define VALID    0
-#define INVALID -1
+#define VALID        0
+#define NO_PEAK     -1
+#define TOO_HIGH    -2
+#define TOO_LOW     -3
 
 
 // prototypes
-int measure_frequency(uint16_t *signal, int n, float *frequency);
-int acorr_find_first_peak(int16_t *signal, float *acorr, float threshold_factor, int n, int* index);
+int init_data_acquisition(uint *dma_chan, dma_channel_config *cfg);
+int get_signal(uint dma_chan, dma_channel_config *cfg, uint16_t *signal);
+int measure_frequency(uint16_t *signal, float *frequency);
+int acorr_find_first_peak(int16_t *signal, float *acorr, int* index);
 float find_precise_peak(float *signal, int index);
-uint16_t get_bias(uint16_t *signal, int n) ;
-void remove_bias(uint16_t *signal_in, int16_t *signal_out, uint16_t bias, int n);
+uint16_t get_bias(uint16_t *signal) ;
+void remove_bias(uint16_t *signal_in, int16_t *signal_out, uint16_t bias);
 
 // main entry point
 int main() 
 {
     float frequency;
     int status;
+    uint dma_chan;
+    dma_channel_config cfg;
     uint16_t signal[SIGNAL_LEN];
 
     stdio_init_all();
 
-        // goto processing;
+    init_data_acquisition(&dma_chan, &cfg);
 
+    while (1) 
+    {
+        get_signal(dma_chan, &cfg, signal);
+
+        status = measure_frequency(signal, &frequency);
+
+        // Print measured frequency if valid
+        switch(status) {
+            case VALID:
+            printf(" %6.2f\n", frequency);
+            break;
+
+            case NO_PEAK:
+            printf(" NO PEAK\n");
+            break;
+
+            case TOO_LOW:
+            printf(" TOO LOW\n");
+            break;
+
+            case TOO_HIGH:
+            printf(" TOO HIGH\n");
+            break;
+        }
+    }
+}
+
+
+/**
+ * @brief           Initialize pico data acquisition
+ * @param dma_chan  pointer to dma channel assigned to ADC transfers. Output
+ * @param cfg       pointer to dma channel configuration. Output
+ * @returns         0
+ */
+int init_data_acquisition(uint *dma_chan, dma_channel_config *cfg) 
+{
     // Init GPIO for analogue use: hi-Z, no pulls, disable digital input buffer.
     adc_gpio_init(26 + ADC_CHANNEL);
 
@@ -106,58 +167,55 @@ int main()
     adc_set_clkdiv(ADC_DIVINT);
 
     // Set up the DMA to start transferring data as soon as it appears in FIFO
-    uint dma_chan = dma_claim_unused_channel(true);
-    dma_channel_config cfg = dma_channel_get_default_config(dma_chan);
+    *dma_chan = dma_claim_unused_channel(true);
+    *cfg = dma_channel_get_default_config(*dma_chan);
 
     // Reading from constant address, writing to incrementing byte addresses
-    channel_config_set_transfer_data_size(&cfg, DMA_SIZE_16);
-    channel_config_set_read_increment(&cfg, false);
-    channel_config_set_write_increment(&cfg, true);
+    channel_config_set_transfer_data_size(cfg, DMA_SIZE_16);
+    channel_config_set_read_increment(cfg, false);
+    channel_config_set_write_increment(cfg, true);
 
     // Pace transfers based on availability of ADC samples
-    channel_config_set_dreq(&cfg, DREQ_ADC);
-
-    while (1) 
-    {
-        dma_channel_configure(dma_chan, &cfg,
-            signal,         // dst
-            &adc_hw->fifo,  // src
-            SIGNAL_LEN,     // transfer count
-            true            // start immediately
-        );
-
-        // Start capture
-        adc_run(true);
-        // Once DMA finishes, stop any new conversions from starting, and clean up
-        // the FIFO in case the ADC was still mid-conversion.
-        dma_channel_wait_for_finish_blocking(dma_chan);
-        adc_run(false);
-        adc_fifo_drain();
-
-            // processing:
-
-        // Signal processing
-        status = measure_frequency(signal, SIGNAL_LEN, &frequency);
-        // status = measure_frequency(data, SIGNAL_LEN, &frequency);
-
-        // Print measured frequency if valid
-        if (status == VALID) {
-            printf(" %6.2f\n", frequency);
-        }
-        else {
-            printf(" INVALID\n");
-        }
-    }
+    channel_config_set_dreq(cfg, DREQ_ADC);
+    
+    return 0;
 }
+
+/**
+ * @brief           Digitize n samples with ADC and place them in array signal
+ * @param dma_chan  dma channel assigned to ADC transfers.
+ * @param cfg       pointer to dma channel configuration. cfg is modified.
+ * @param signal    array filled with digitized samples
+ * @returns         0
+ */
+int get_signal(uint dma_chan, dma_channel_config *cfg, uint16_t *signal)
+{
+    dma_channel_configure(dma_chan, cfg,
+        signal,         // dst
+        &adc_hw->fifo,  // src
+        SIGNAL_LEN,     // transfer count
+        true            // start immediately
+    );
+
+    // Start capture
+    adc_run(true);
+    // Once DMA finishes, stop any new conversions from starting, and clean up
+    // the FIFO in case the ADC was still mid-conversion.
+    dma_channel_wait_for_finish_blocking(dma_chan);
+    adc_run(false);
+    adc_fifo_drain();
+
+    return 0;
+}
+
 
 /**
  * @brief measure the main frequency of the signal using a autocorrelation algorythm
  * @param signal_in array containing the input signal
- * @param n         array length
  * @param frequency frequency measured. output.
  * @returns         VALID if frequency contains a valid value
  */
-int measure_frequency(uint16_t *signal_in, int n, float *frequency)
+int measure_frequency(uint16_t *signal_in, float *frequency)
 {
     int status;
     int index;
@@ -166,19 +224,91 @@ int measure_frequency(uint16_t *signal_in, int n, float *frequency)
     int16_t  unbiased_signal[SIGNAL_LEN];
     float    acorr[SIGNAL_LEN];
 
-    bias = get_bias(signal_in, n);
-    remove_bias(signal_in, unbiased_signal, bias, n);
+    bias = get_bias(signal_in);
+    remove_bias(signal_in, unbiased_signal, bias);
 
-    status = acorr_find_first_peak(unbiased_signal, acorr, THRESHOLD_FACTOR, n, &index);
+    status = acorr_find_first_peak(unbiased_signal, acorr, &index);
 
     if (status == VALID) {
         precise_index = find_precise_peak(acorr, index);
         *frequency = SAMPLING_FREQUENCY / precise_index;
-        return VALID;
     }
-    return INVALID;
+
+    return status;
 }
 
+
+/**
+ * @brief           Perform an autocorrelation on signal and find the index of first peak 
+ *                  found in the signal. The peak must exceed signal[0]*threshold_factor. 
+ * @param signal    array containing the signal
+ * @param acorr     array containing the autocorrelation of the signal up to index+1 only
+ * @param threshold_factor 
+ *                  value between 0 and 1 by which signal[0] is multiplied
+ *                  to obtain the detection threshold.
+ * @param index     signal index where the peak was found
+ * @returns         true if a peak was found
+ */
+int acorr_find_first_peak(int16_t *signal, float *acorr, int* index)
+{
+    int i, k;
+    int state;
+    int slope_positive;
+    int threshold_exceeded;
+    int64_t sum;
+    int64_t sum_at_index0;
+    int64_t previous_sum;
+    int64_t threshold;
+    
+    state = SET_THRESHOLD;
+    sum = 0;
+    sum_at_index0 = 1000;  // arbritary starting value, will be overwritten.
+
+    for(i = 0; i < MAX_COUNT; i++) {
+
+        // compute autocorrelation
+        previous_sum = sum;
+        sum = 0;
+        for(k = 0; k < MAX_COUNT - i; k++)
+            sum += signal[k] * signal[k+i];
+    
+        // record autocorrelation result
+        acorr[i] = (float) sum / sum_at_index0;
+
+        // set peak detection flags
+        slope_positive = (sum - previous_sum) > 0;
+        threshold_exceeded = sum > threshold;
+
+        // peak detection state machine
+        if (state == SEARCH_DOWN && !slope_positive) {
+            state = PEAK_FOUND;
+            break;
+        }
+        if (state == SEARCH_UP_AND_EXCEEDED && slope_positive && threshold_exceeded) {
+            state = SEARCH_DOWN;
+        }
+        if (state == SET_THRESHOLD) {
+            sum_at_index0 = sum;
+            acorr[0] = 0.0f;  // overwrite acorr[0] on loop's first iteration
+            threshold = (int64_t) (sum_at_index0 * HIGH_THRES);
+            state = SEARCH_UP_AND_EXCEEDED;
+        }
+        if (i == MID_MIN_COUNT) {
+            threshold = (int64_t) (sum_at_index0 * MID_THRES);
+        }
+        if (i == LOW_MIN_COUNT) {
+            threshold = (int64_t) (sum_at_index0 * LOW_THRES);
+        }
+    }
+
+    if (state == PEAK_FOUND) {
+        if (i < MIN_COUNT)  return TOO_HIGH;
+        if (i >= MAX_COUNT) return TOO_LOW;
+        *index = i - 1;
+        return VALID;
+    }
+    return NO_PEAK;
+}
 
 
 /**
@@ -202,83 +332,16 @@ float find_precise_peak(float *signal, int index)
 
 
 /**
- * @brief           Perform an autocorrelation on signal and find the index of first peak 
- *                  found in the signal. The peak must exceed signal[0]*threshold_factor. 
- * @param signal    array containing the signal
- * @param acorr     array containing the autocorrelation of the signal up to index+1 only
- * @param threshold_factor 
- *                  value between 0 and 1 by which signal[0] is multiplied
- *                  to obtain the detection threshold.
- * @param n         array length
- * @param index     signal index where the peak was found
- * @returns         true if a peak was found
- */
-int acorr_find_first_peak(int16_t *signal, float *acorr, float threshold_factor, int n, int* index)
-{
-    int i, k;
-    int state;
-    int slope_positive;
-    int threshold_exceeded;
-    int64_t sum;
-    int64_t sum_at_index0;
-    int64_t previous_sum;
-    int64_t threshold;
-    
-    state = SET_THRESHOLD;
-    sum = 0;
-    sum_at_index0 = 1000;  // arbritary starting value, will be overwritten.
-
-    for(i = 0; i < n; i++) {
-
-        // compute autocorrelation
-        previous_sum = sum;
-        sum = 0;
-        for(k = 0; k < n - i; k++)
-            sum += signal[k] * signal[k+i];
-    
-        // record autocorrelation result
-        acorr[i] = (float) sum / sum_at_index0;
-
-        // set peak detection flags
-        slope_positive = (sum - previous_sum) > 0;
-        threshold_exceeded = sum > threshold;
-
-        // peak detection state machine
-        if (state == SEARCH_DOWN && !slope_positive) {
-            state = PEAK_FOUND;
-            break;
-        }
-        if (state == SEARCH_UP_AND_EXCEEDED && slope_positive && threshold_exceeded) {
-            state = SEARCH_DOWN;
-        }
-        if (state == SET_THRESHOLD) {
-            sum_at_index0 = sum;
-            acorr[0] = 0.0f;  // overwrite acorr[0] on loop's first iteration
-            threshold = (int64_t) (sum * threshold_factor);
-            state = SEARCH_UP_AND_EXCEEDED;
-        }
-    }
-
-    if (state == PEAK_FOUND) {
-        *index = i - 1;
-        return VALID;
-    }
-    return INVALID;
-}
-
-
-/**
  * @brief compute the bias of an analog signal
  * @param signal  array containing the signal.
- * @param n       array length
  * @returns       the bias value
  */
-uint16_t get_bias(uint16_t *signal, int n) 
+uint16_t get_bias(uint16_t *signal) 
 {
     int32_t bias = 0;
-    for (int i = 0; i < n; i++)
+    for (int i = 0; i < SIGNAL_LEN; i++)
         bias += signal[i];
-    return (uint16_t) (bias / n);
+    return (uint16_t) (bias / SIGNAL_LEN);
 }
 
 
@@ -287,11 +350,10 @@ uint16_t get_bias(uint16_t *signal, int n)
  * @param signal_in  input array containing the signal to remove the bias from.
  * @param signal_out output array containing the signal from which the bias was removed. 
  * @param bias       value to remove from the input signal
- * @param n          array length
  */
-void remove_bias(uint16_t *signal_in, int16_t *signal_out, uint16_t bias, int n) 
+void remove_bias(uint16_t *signal_in, int16_t *signal_out, uint16_t bias) 
 {
-    for (int i = 0; i < n; i++) 
+    for (int i = 0; i < SIGNAL_LEN; i++) 
         signal_out[i] = (int16_t)signal_in[i] - (int16_t)bias;
 }
 
