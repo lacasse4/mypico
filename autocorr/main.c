@@ -15,7 +15,8 @@
 #include "hardware/adc.h"
 #include "hardware/dma.h"
 
-#include "data.h"
+// #include "data.h"
+// #include "E.h"
 
 /*
  * Basse guitar string frequencies in Hz
@@ -60,7 +61,7 @@
  */
 #define SIGNAL_LEN  1024
 
-#define THRESHOLD_FACTOR      0.7
+#define THRESHOLD_FACTOR        0.75
 #define SET_THRESHOLD           0
 #define SEARCH_UP_AND_EXCEEDED  1
 #define SEARCH_DOWN             2
@@ -69,29 +70,24 @@
 #define VALID    0
 #define INVALID -1
 
-typedef struct peak {
-    int index;            // peak index in signal array
-    double precise_index; // precise peak index
-    double value;         // peak value
-} peak_t;
-
-uint16_t signal[SIGNAL_LEN];
-int16_t mean;
-float frequency;
-int status;
 
 // prototypes
 int measure_frequency(uint16_t *signal, int n, float *frequency);
-int acorr_find_first_peak(int16_t *signal, float threshold_factor, int n, int* index);
-float find_precise_peak(int16_t *signal, int index);
+int acorr_find_first_peak(int16_t *signal, float *acorr, float threshold_factor, int n, int* index);
+float find_precise_peak(float *signal, int index);
 uint16_t get_bias(uint16_t *signal, int n) ;
 void remove_bias(uint16_t *signal_in, int16_t *signal_out, uint16_t bias, int n);
 
 // main entry point
-int main() {
+int main() 
+{
+    float frequency;
+    int status;
+    uint16_t signal[SIGNAL_LEN];
+
     stdio_init_all();
 
-        goto processing;
+        // goto processing;
 
     // Init GPIO for analogue use: hi-Z, no pulls, disable digital input buffer.
     adc_gpio_init(26 + ADC_CHANNEL);
@@ -121,34 +117,36 @@ int main() {
     // Pace transfers based on availability of ADC samples
     channel_config_set_dreq(&cfg, DREQ_ADC);
 
-    dma_channel_configure(dma_chan, &cfg,
-        signal,         // dst
-        &adc_hw->fifo,  // src
-        SIGNAL_LEN,     // transfer count
-        true            // start immediately
-    );
+    while (1) 
+    {
+        dma_channel_configure(dma_chan, &cfg,
+            signal,         // dst
+            &adc_hw->fifo,  // src
+            SIGNAL_LEN,     // transfer count
+            true            // start immediately
+        );
 
-    // Start capture
-    adc_run(true);
-    // Once DMA finishes, stop any new conversions from starting, and clean up
-    // the FIFO in case the ADC was still mid-conversion.
-    dma_channel_wait_for_finish_blocking(dma_chan);
-    adc_run(false);
-    adc_fifo_drain();
+        // Start capture
+        adc_run(true);
+        // Once DMA finishes, stop any new conversions from starting, and clean up
+        // the FIFO in case the ADC was still mid-conversion.
+        dma_channel_wait_for_finish_blocking(dma_chan);
+        adc_run(false);
+        adc_fifo_drain();
 
-processing:
+            // processing:
 
-    // Signal processing
-    // status = measure_frequency(signal, SIGNAL_LEN, &frequency);
-    status = measure_frequency(data, SIGNAL_LEN, &frequency);
+        // Signal processing
+        status = measure_frequency(signal, SIGNAL_LEN, &frequency);
+        // status = measure_frequency(data, SIGNAL_LEN, &frequency);
 
-
-    // Print measured frequency if valid
-    if (status == VALID) {
-        printf(" %6.2f\n", frequency);
-    }
-    else {
-        printf(" INVALID\n");
+        // Print measured frequency if valid
+        if (status == VALID) {
+            printf(" %6.2f\n", frequency);
+        }
+        else {
+            printf(" INVALID\n");
+        }
     }
 }
 
@@ -166,14 +164,15 @@ int measure_frequency(uint16_t *signal_in, int n, float *frequency)
     float precise_index = 0.0;
     uint16_t bias;
     int16_t  unbiased_signal[SIGNAL_LEN];
+    float    acorr[SIGNAL_LEN];
 
     bias = get_bias(signal_in, n);
     remove_bias(signal_in, unbiased_signal, bias, n);
 
-    status = acorr_find_first_peak(unbiased_signal, THRESHOLD_FACTOR, n, &index);
+    status = acorr_find_first_peak(unbiased_signal, acorr, THRESHOLD_FACTOR, n, &index);
 
     if (status == VALID) {
-        precise_index = find_precise_peak(unbiased_signal, index);
+        precise_index = find_precise_peak(acorr, index);
         *frequency = SAMPLING_FREQUENCY / precise_index;
         return VALID;
     }
@@ -189,7 +188,7 @@ int measure_frequency(uint16_t *signal_in, int n, float *frequency)
  * @param index     previously found peak index
  * @returns         peak position with greater precision
  */
-float find_precise_peak(int16_t *signal, int index)
+float find_precise_peak(float *signal, int index)
 {
   float delta;
 
@@ -206,6 +205,7 @@ float find_precise_peak(int16_t *signal, int index)
  * @brief           Perform an autocorrelation on signal and find the index of first peak 
  *                  found in the signal. The peak must exceed signal[0]*threshold_factor. 
  * @param signal    array containing the signal
+ * @param acorr     array containing the autocorrelation of the signal up to index+1 only
  * @param threshold_factor 
  *                  value between 0 and 1 by which signal[0] is multiplied
  *                  to obtain the detection threshold.
@@ -213,30 +213,37 @@ float find_precise_peak(int16_t *signal, int index)
  * @param index     signal index where the peak was found
  * @returns         true if a peak was found
  */
-int acorr_find_first_peak(int16_t *signal, float threshold_factor, int n, int* index)
+int acorr_find_first_peak(int16_t *signal, float *acorr, float threshold_factor, int n, int* index)
 {
     int i, k;
     int state;
     int slope_positive;
     int threshold_exceeded;
     int64_t sum;
+    int64_t sum_at_index0;
     int64_t previous_sum;
     int64_t threshold;
     
     state = SET_THRESHOLD;
     sum = 0;
+    sum_at_index0 = 1000;  // arbritary starting value, will be overwritten.
 
     for(i = 0; i < n; i++) {
 
+        // compute autocorrelation
         previous_sum = sum;
         sum = 0;
         for(k = 0; k < n - i; k++)
             sum += signal[k] * signal[k+i];
     
-        // Peak detection state machine
+        // record autocorrelation result
+        acorr[i] = (float) sum / sum_at_index0;
+
+        // set peak detection flags
         slope_positive = (sum - previous_sum) > 0;
         threshold_exceeded = sum > threshold;
 
+        // peak detection state machine
         if (state == SEARCH_DOWN && !slope_positive) {
             state = PEAK_FOUND;
             break;
@@ -245,13 +252,15 @@ int acorr_find_first_peak(int16_t *signal, float threshold_factor, int n, int* i
             state = SEARCH_DOWN;
         }
         if (state == SET_THRESHOLD) {
+            sum_at_index0 = sum;
+            acorr[0] = 0.0f;  // overwrite acorr[0] on loop's first iteration
             threshold = (int64_t) (sum * threshold_factor);
             state = SEARCH_UP_AND_EXCEEDED;
         }
     }
 
     if (state == PEAK_FOUND) {
-        *index = i;
+        *index = i - 1;
         return VALID;
     }
     return INVALID;

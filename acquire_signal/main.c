@@ -31,7 +31,7 @@
 
 // Channel 0 is GPIO26
 #define CAPTURE_CHANNEL 0
-#define CAPTURE_DEPTH 1000
+#define CAPTURE_DEPTH 1024
 
 uint16_t capture_buf[CAPTURE_DEPTH];
 
@@ -61,7 +61,6 @@ int main() {
     // Set sample speed to 10 Ksps 
     adc_set_clkdiv(4799);
 
-    printf("Arming DMA\n");
     // sleep_ms(1000);
     // Set up the DMA to start transferring data as soon as it appears in FIFO
     uint dma_chan = dma_claim_unused_channel(true);
@@ -82,20 +81,16 @@ int main() {
         true            // start immediately
     );
 
-    printf("Starting capture\n");
     adc_run(true);
 
     // Once DMA finishes, stop any new conversions from starting, and clean up
     // the FIFO in case the ADC was still mid-conversion.
     dma_channel_wait_for_finish_blocking(dma_chan);
-    printf("Capture finished\n");
     adc_run(false);
     adc_fifo_drain();
 
-    printf("---------------------\n");
     // Print samples to stdout so you can display them in pyplot, excel, matlab
     for (int i = 0; i < CAPTURE_DEPTH; ++i) {
-        printf("%-3d\n ", capture_buf[i]);
+        printf(" %-3d\n", capture_buf[i]);
     }
-    printf("---------------------\n");
 }
