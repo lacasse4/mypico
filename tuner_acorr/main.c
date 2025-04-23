@@ -15,6 +15,8 @@
 #include "hardware/adc.h"
 #include "hardware/dma.h"
 
+#include "accur.h"
+
 // #include "data.h"
 // #include "E.h"
 
@@ -95,22 +97,34 @@ uint32_t gap;
 // prototypes
 int init_data_acquisition(uint *dma_chan, dma_channel_config *cfg);
 int get_signal(uint dma_chan, dma_channel_config *cfg, uint16_t *signal);
-int measure_frequency(uint16_t *signal, float *frequency);
-int acorr_find_first_peak(int16_t *signal, float *acorr, int* index);
-float find_precise_peak(float *signal, int index);
+int measure_frequency(uint16_t *signal, double *frequency);
+int acorr_find_first_peak(int16_t *signal, double *acorr, int* index);
+double find_precise_peak(double *signal, int index);
 uint16_t get_bias(uint16_t *signal) ;
 void remove_bias(uint16_t *signal_in, int16_t *signal_out, uint16_t bias);
 
 // main entry point
 int main() 
 {
-    float frequency;
-    int status;
+    double frequency;
+    int detection_status;
+    int statistic_status;
     uint dma_chan;
     dma_channel_config cfg;
     uint16_t signal[SIGNAL_LEN];
+    accur_t *accur;
+    double accuracy;
+    double precision;
+
 
     stdio_init_all();
+
+    accur = create_accur(10, 200);
+    if (!accur) {
+        printf("error: accur_create()\n");
+        return 0;
+    }
+    printf("OK\n");
 
     init_data_acquisition(&dma_chan, &cfg);
 
@@ -120,18 +134,27 @@ int main()
 
         get_signal(dma_chan, &cfg, signal);
 
-        status = measure_frequency(signal, &frequency);
+        detection_status = measure_frequency(signal, &frequency);
 
         gap = time_us_32() - start_time;
 
         // Print measured frequency if valid
-        if (status == VALID) {
-            printf(" %7.2f  %lu\n", frequency, gap);
+        printf("  sec: %5.3lf", (double)gap/1000000);
+        if (detection_status == VALID) {
+            printf("  freq: %7.2lf", frequency);
+            statistic_status = accur_add(accur, frequency);
+            if (statistic_status == ACCUR_OK) {
+                statistic_status = accur_results(accur, &accuracy, &precision);
+                printf("  acc: %5.2lf  prec: %5.2lf", accuracy, precision);
+            }
         }
         else {
-            printf("          %lu\n", gap);
+            accur_flush(accur);
         }
+        printf("\n");
     }
+
+    release_accur(accur);
 }
 
 
@@ -208,14 +231,14 @@ int get_signal(uint dma_chan, dma_channel_config *cfg, uint16_t *signal)
  * @param frequency frequency measured. output.
  * @returns         VALID if frequency contains a valid value
  */
-int measure_frequency(uint16_t *signal_in, float *frequency)
+int measure_frequency(uint16_t *signal_in, double *frequency)
 {
     int status;
     int index;
-    float precise_index = 0.0;
+    double precise_index = 0.0;
     uint16_t bias;
     int16_t  unbiased_signal[SIGNAL_LEN];
-    float    acorr[SIGNAL_LEN];
+    double   acorr[SIGNAL_LEN];
 
     bias = get_bias(signal_in);
     remove_bias(signal_in, unbiased_signal, bias);
@@ -242,7 +265,7 @@ int measure_frequency(uint16_t *signal_in, float *frequency)
  * @param index     signal index where the peak was found
  * @returns         true if a peak was found
  */
-int acorr_find_first_peak(int16_t *signal, float *acorr, int* index)
+int acorr_find_first_peak(int16_t *signal, double *acorr, int *index)
 {
     int i, k;
     int state;
@@ -258,7 +281,7 @@ int acorr_find_first_peak(int16_t *signal, float *acorr, int* index)
     sum = 0;
     sum_at_index0 = 1000;  // arbritary starting value, will be overwritten.
 
-    for(i = 0; i < MAX_COUNT; i++) {
+    for (i = 0; i < MAX_COUNT; i++) {
 
         // compute autocorrelation
         previous_sum = sum;
@@ -267,7 +290,7 @@ int acorr_find_first_peak(int16_t *signal, float *acorr, int* index)
             sum += signal[k] * signal[k+i];
     
         // record autocorrelation result
-        acorr[i] = (float) sum / sum_at_index0;
+        acorr[i] = (double) sum / sum_at_index0;
 
         // set peak detection flags
         slope_positive = (sum - previous_sum) > 0;
@@ -311,9 +334,9 @@ int acorr_find_first_peak(int16_t *signal, float *acorr, int* index)
  * @param index     previously found peak index
  * @returns         peak position with greater precision
  */
-float find_precise_peak(float *signal, int index)
+double find_precise_peak(double *signal, int index)
 {
-  float delta;
+  double delta;
 
   delta = (signal[index-1] - signal[index+1]) * 0.5f /
           (signal[index-1] - (2.0f * signal[index]) + signal[index+1]);
@@ -359,9 +382,9 @@ void remove_bias(uint16_t *signal_in, int16_t *signal_out, uint16_t bias)
  * @returns             signal power
  * @note    the signal shall not include any bias.
  */
-float estimate_signal_power(float *signal, int start_index, int stop_index)
+double estimate_signal_power(double *signal, int start_index, int stop_index)
 {
-  float power = 0.0;
+  double power = 0.0;
   for (int i = start_index; i <= stop_index; i++) power += signal[i] * signal[i];
   return power / (stop_index - start_index + 1);  
 }
