@@ -91,6 +91,10 @@
 #define VALID        0
 #define INVALID     -1
 
+#define ALPHA       0.1
+#define STABLE      0
+#define RESET       1
+
 uint32_t start_time;
 uint32_t gap;
 
@@ -116,6 +120,8 @@ int main()
     double accuracy;
     double precision;
 
+    double filtered_frequency;
+    int filter_status;
 
     stdio_init_all();
 
@@ -127,6 +133,8 @@ int main()
     printf("OK\n");
 
     init_data_acquisition(&dma_chan, &cfg);
+
+    filter_status = RESET;
 
     while (1) 
     {
@@ -141,11 +149,19 @@ int main()
         // Print measured frequency if valid
         printf("  sec: %5.3lf", (double)gap/1000000);
         if (detection_status == VALID) {
-            printf("  freq: %7.2lf", frequency);
-            statistic_status = accur_add(accur, frequency);
+            if (filter_status == RESET) {
+                filtered_frequency = frequency;
+                filter_status = STABLE;
+            }
+            else {
+                filtered_frequency = filtered_frequency*(1.0-ALPHA) + frequency*ALPHA;
+            }
+
+            printf("  freq: %6.2lf  filt: %6.2lf", frequency, filtered_frequency);
+            statistic_status = accur_add(accur, filtered_frequency);
             if (statistic_status == ACCUR_OK) {
                 statistic_status = accur_results(accur, &accuracy, &precision);
-                printf("  acc: %5.2lf  prec: %5.2lf", accuracy, precision);
+                printf("  acc: %4.2lf  prec: %4.2lf", accuracy, precision);
             }
         }
         else {
