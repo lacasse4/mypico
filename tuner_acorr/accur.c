@@ -77,8 +77,8 @@ int accur_results(accur_t *accur, double *accuracy, double *precision)
     if (!accur) return ACCUR_FAULT;
 
     if (accur->count >= accur->n) {
-        *precision = calculate_sigma(accur->values + accur->start, accur->n);
-        *accuracy = calculate_accuracy(accur->values + accur->start, accur->n, accur->target);
+        *precision = calculate_sigma(accur->values, accur->n);
+        *accuracy = calculate_accuracy(accur->values, accur->n, accur->target);
         return ACCUR_OK;
     }
     else {

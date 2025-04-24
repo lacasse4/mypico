@@ -119,7 +119,7 @@ int main()
 
     stdio_init_all();
 
-    accur = create_accur(10, 200);
+    accur = create_accur(10, 300);
     if (!accur) {
         printf("error: accur_create()\n");
         return 0;
