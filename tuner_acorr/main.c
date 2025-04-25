@@ -82,6 +82,7 @@
 #define LOW_MAX_FREQ    100     // in Hz
 #define MID_MIN_COUNT   (SAMPLING_FREQUENCY/MID_MAX_FREQ)
 #define LOW_MIN_COUNT   (SAMPLING_FREQUENCY/LOW_MAX_FREQ)
+#define MIN_POWER       50000
 
 #define SET_THRESHOLD           0
 #define SEARCH_UP_AND_EXCEEDED  1
@@ -89,23 +90,35 @@
 #define PEAK_FOUND              3
 
 #define VALID        0
-#define INVALID     -1
+#define LOW_COUNT   -1
+#define HIGH_COUNT  -2
+#define LOW_POWER   -3
 
 #define ALPHA       0.1
 #define STABLE      0
 #define RESET       1
 
+#define ACCURACY_TARGET 200
+
+
+// for debugging
 uint32_t start_time;
 uint32_t gap;
+double global_power;
+int global_index;
+double global_acorr[3];
+double global_precise_index;
 
 // prototypes
 int init_data_acquisition(uint *dma_chan, dma_channel_config *cfg);
-int get_signal(uint dma_chan, dma_channel_config *cfg, uint16_t *signal);
+int get_signal(uint dma_chan, dma_channel_config cfg, uint16_t *signal);
 int measure_frequency(uint16_t *signal, double *frequency);
 int acorr_find_first_peak(int16_t *signal, double *acorr, int* index);
 double find_precise_peak(double *signal, int index);
 uint16_t get_bias(uint16_t *signal) ;
 void remove_bias(uint16_t *signal_in, int16_t *signal_out, uint16_t bias);
+double estimate_signal_power(int16_t *signal);
+
 
 // main entry point
 int main() 
@@ -125,12 +138,11 @@ int main()
 
     stdio_init_all();
 
-    accur = create_accur(10, 300);
+    accur = create_accur(10, ACCURACY_TARGET);
     if (!accur) {
         printf("error: accur_create()\n");
         return 0;
     }
-    printf("OK\n");
 
     init_data_acquisition(&dma_chan, &cfg);
 
@@ -140,14 +152,22 @@ int main()
     {
         start_time = time_us_32();
 
-        get_signal(dma_chan, &cfg, signal);
+        get_signal(dma_chan, cfg, signal);
 
         detection_status = measure_frequency(signal, &frequency);
+        // frequency = frequency - 1.0;  // search me
 
         gap = time_us_32() - start_time;
 
+        // if  (gap <104000) {
+        //     for (int i = 0; i < SIGNAL_LEN; i++) {
+        //         printf(" %u\n", signal[i]);
+        //     }
+        //     while (1) {}
+        // }
+
         // Print measured frequency if valid
-        printf("  sec: %5.3lf", (double)gap/1000000);
+        // printf("  sec: %5.3lf  pow: %6.0lf", (double)gap/1000000, global_power);
         if (detection_status == VALID) {
             if (filter_status == RESET) {
                 filtered_frequency = frequency;
@@ -157,11 +177,18 @@ int main()
                 filtered_frequency = filtered_frequency*(1.0-ALPHA) + frequency*ALPHA;
             }
 
-            printf("  freq: %6.2lf  filt: %6.2lf", frequency, filtered_frequency);
+            printf("  freq: %6.2lf", frequency);
+            printf("  filt: %6.2lf", filtered_frequency);
+            printf("  l: %6.5lf", global_acorr[1] - global_acorr[0]);
+            printf("  r: %6.5lf", global_acorr[1] - global_acorr[2]);
+            printf("  indx: %d", global_index);
+            printf("  pi: %6.2lf", global_precise_index);
+
             statistic_status = accur_add(accur, filtered_frequency);
             if (statistic_status == ACCUR_OK) {
                 statistic_status = accur_results(accur, &accuracy, &precision);
-                printf("  acc: %4.2lf  prec: %4.2lf", accuracy, precision);
+                printf("  acc: % -4.2lf", accuracy);
+                printf("  prec: %4.2lf", precision);
             }
         }
         else {
@@ -220,9 +247,9 @@ int init_data_acquisition(uint *dma_chan, dma_channel_config *cfg)
  * @param signal    array filled with digitized samples
  * @returns         0
  */
-int get_signal(uint dma_chan, dma_channel_config *cfg, uint16_t *signal)
+int get_signal(uint dma_chan, dma_channel_config cfg, uint16_t *signal)
 {
-    dma_channel_configure(dma_chan, cfg,
+    dma_channel_configure(dma_chan, &cfg,
         signal,         // dst
         &adc_hw->fifo,  // src
         SIGNAL_LEN,     // transfer count
@@ -252,6 +279,7 @@ int measure_frequency(uint16_t *signal_in, double *frequency)
     int status;
     int index;
     double precise_index = 0.0;
+    double power;
     uint16_t bias;
     int16_t  unbiased_signal[SIGNAL_LEN];
     double   acorr[SIGNAL_LEN];
@@ -259,10 +287,20 @@ int measure_frequency(uint16_t *signal_in, double *frequency)
     bias = get_bias(signal_in);
     remove_bias(signal_in, unbiased_signal, bias);
 
-    status = acorr_find_first_peak(unbiased_signal, acorr, &index);
+    power = estimate_signal_power(unbiased_signal);
+    global_power = power;
+    if (power < MIN_POWER) return LOW_POWER;
 
+    status = acorr_find_first_peak(unbiased_signal, acorr, &index);
+    global_index = index;
+    global_acorr[0] = acorr[index-1];
+    global_acorr[1] = acorr[index];
+    global_acorr[2] = acorr[index+1];
+
+    *frequency = 0.0;
     if (status == VALID) {
         precise_index = find_precise_peak(acorr, index);
+        global_precise_index = precise_index;
         *frequency = SAMPLING_FREQUENCY / precise_index;
     }
 
@@ -274,10 +312,7 @@ int measure_frequency(uint16_t *signal_in, double *frequency)
  * @brief           Perform an autocorrelation on signal and find the index of first peak 
  *                  found in the signal. The peak must exceed signal[0]*threshold_factor. 
  * @param signal    array containing the signal
- * @param acorr     array containing the autocorrelation of the signal up to index+1 only
- * @param threshold_factor 
- *                  value between 0 and 1 by which signal[0] is multiplied
- *                  to obtain the detection threshold.
+ * @param acorr     array containing the signal's normalized autocorrelation up to index+1 only
  * @param index     signal index where the peak was found
  * @returns         true if a peak was found
  */
@@ -295,7 +330,7 @@ int acorr_find_first_peak(int16_t *signal, double *acorr, int *index)
     *index = 0;
     state = SET_THRESHOLD;
     sum = 0;
-    sum_at_index0 = 1000;  // arbritary starting value, will be overwritten.
+    sum_at_index0 = 1;  // arbritary starting value to avoid division by 0, will be overwritten.
 
     for (i = 0; i < MAX_COUNT; i++) {
 
@@ -322,7 +357,7 @@ int acorr_find_first_peak(int16_t *signal, double *acorr, int *index)
         }
         if (state == SET_THRESHOLD) {
             sum_at_index0 = sum;
-            acorr[0] = 0.0f;  // overwrite acorr[0] on loop's first iteration
+            acorr[0] = 1.0;     // accor is normalized
             threshold = (int64_t) (sum_at_index0 * HIGH_THRES);
             state = SEARCH_UP_AND_EXCEEDED;
         }
@@ -336,10 +371,10 @@ int acorr_find_first_peak(int16_t *signal, double *acorr, int *index)
 
     if (state == PEAK_FOUND) {
         *index = i - 1;
-        if (*index < MIN_COUNT) return INVALID;
+        if (*index < MIN_COUNT) return LOW_COUNT;
         return VALID;
     }
-    return INVALID;
+    return HIGH_COUNT;
 }
 
 
@@ -393,16 +428,15 @@ void remove_bias(uint16_t *signal_in, int16_t *signal_out, uint16_t bias)
 /**
  * @brief   estimate the power of the input signal
  * @param signal        array containing the input signal
- * @param start_index   starting index 
- * @param stop_index    stoping index
  * @returns             signal power
  * @note    the signal shall not include any bias.
  */
-double estimate_signal_power(double *signal, int start_index, int stop_index)
+double estimate_signal_power(int16_t *signal)
 {
-  double power = 0.0;
-  for (int i = start_index; i <= stop_index; i++) power += signal[i] * signal[i];
-  return power / (stop_index - start_index + 1);  
+    int64_t power = 0.0;
+    for (int i = 0; i < SIGNAL_LEN; i++) 
+        power += signal[i] * signal[i];
+    return (double)power / SIGNAL_LEN;  
 }
 
 

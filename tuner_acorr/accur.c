@@ -117,5 +117,5 @@ double calculate_accuracy(double *values, int count, double target) {
     }
     double mean = sum / count;
 
-    return fabs(mean - target);
+    return mean - target;
 }
