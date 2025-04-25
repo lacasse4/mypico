@@ -15,6 +15,7 @@ struct accur {
     double values[MAX_N];
 };
 
+// private functions
 static double calculate_sigma(double *values, int count);
 static double calculate_accuracy(double *values, int count, double target);
 

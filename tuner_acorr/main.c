@@ -11,11 +11,15 @@
  */
 
 #include <stdio.h>
+#include <assert.h>
+
 #include "pico/stdlib.h"
 #include "hardware/adc.h"
 #include "hardware/dma.h"
 
 #include "accur.h"
+#include "alpha.h"
+#include "limit.h"
 
 // #include "data.h"
 // #include "E.h"
@@ -95,10 +99,9 @@
 #define LOW_POWER   -3
 
 #define ALPHA       0.1
-#define STABLE      0
-#define RESET       1
 
 #define ACCURACY_TARGET 200
+#define MAX_FREQ_PCT    0.10
 
 
 // for debugging
@@ -123,30 +126,33 @@ double estimate_signal_power(int16_t *signal);
 // main entry point
 int main() 
 {
-    double frequency;
     int detection_status;
     int statistic_status;
     uint dma_chan;
     dma_channel_config cfg;
     uint16_t signal[SIGNAL_LEN];
     accur_t *accur;
+    alpha_t *alpha;
+    limit_t *limit;
     double accuracy;
     double precision;
 
+    double frequency;
     double filtered_frequency;
-    int filter_status;
+    int counter = 0;
 
     stdio_init_all();
 
     accur = create_accur(10, ACCURACY_TARGET);
-    if (!accur) {
-        printf("error: accur_create()\n");
-        return 0;
-    }
+    assert(accur);
+
+    alpha = create_alpha(ALPHA);
+    assert(alpha);
+
+    limit = create_limit(MAX_FREQ_PCT, 0.0);
+    assert(limit);
 
     init_data_acquisition(&dma_chan, &cfg);
-
-    filter_status = RESET;
 
     while (1) 
     {
@@ -155,49 +161,45 @@ int main()
         get_signal(dma_chan, cfg, signal);
 
         detection_status = measure_frequency(signal, &frequency);
-        // frequency = frequency - 1.0;  // search me
 
         gap = time_us_32() - start_time;
 
-        // if  (gap <104000) {
-        //     for (int i = 0; i < SIGNAL_LEN; i++) {
-        //         printf(" %u\n", signal[i]);
-        //     }
-        //     while (1) {}
-        // }
-
         // Print measured frequency if valid
         // printf("  sec: %5.3lf  pow: %6.0lf", (double)gap/1000000, global_power);
+
+        printf("%5d", counter++);
         if (detection_status == VALID) {
-            if (filter_status == RESET) {
-                filtered_frequency = frequency;
-                filter_status = STABLE;
+
+            printf("  frq: %6.2lf", frequency);
+            printf("  idx: %d", global_index);
+            printf("  pdx: %6.2lf", global_precise_index);
+
+            if (limit_next(limit, frequency)) { 
+                filtered_frequency = alpha_filter(alpha, frequency);
+                printf("  flt: %6.2lf", filtered_frequency);
+
+                statistic_status = accur_add(accur, filtered_frequency);
+                if (statistic_status == ACCUR_OK) {
+                    statistic_status = accur_results(accur, &accuracy, &precision);
+                    printf("  acc: % -4.2lf", accuracy);
+                    printf("  prc: %4.2lf", precision);
+                }
             }
             else {
-                filtered_frequency = filtered_frequency*(1.0-ALPHA) + frequency*ALPHA;
-            }
-
-            printf("  freq: %6.2lf", frequency);
-            printf("  filt: %6.2lf", filtered_frequency);
-            printf("  l: %6.5lf", global_acorr[1] - global_acorr[0]);
-            printf("  r: %6.5lf", global_acorr[1] - global_acorr[2]);
-            printf("  indx: %d", global_index);
-            printf("  pi: %6.2lf", global_precise_index);
-
-            statistic_status = accur_add(accur, filtered_frequency);
-            if (statistic_status == ACCUR_OK) {
-                statistic_status = accur_results(accur, &accuracy, &precision);
-                printf("  acc: % -4.2lf", accuracy);
-                printf("  prec: %4.2lf", precision);
+                alpha_reset(alpha);
+                accur_flush(accur);
             }
         }
         else {
+            alpha_reset(alpha);
             accur_flush(accur);
         }
         printf("\n");
     }
 
     release_accur(accur);
+    release_alpha(alpha);
+    release_limit(limit);
 }
 
 
