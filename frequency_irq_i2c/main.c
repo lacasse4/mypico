@@ -1,12 +1,18 @@
 /**
- * freq_to_display.c
+ * @name frequency_irq_i2c
+ * @details
+ * Simple bass/guitar tuner using an zero crossing algorithm
+ *  - runs on a Raspberry pi pico 1 built w/ C/C++ SDK 1.5.1
+ *  - detects fallings edges on GPIO 14 (PIN_IRQ) for frequency estimation 
+ *  - display frequency using two 15 LEDs bargraph, and the guitar string 
+ *    on a third 6 LEDs bargraph. The bargraphs are driven by three
+ *    MCP23018 connected via a single i2c channel.
+ * 
+ * @note  It is assumed that the input signal is analogicaly filtered 
+ * with an 8 poles low pass filter that is set with a 1 KHz cut off frequency. 
  *
- * Guitar tuner
- * 
- * Measure frequency on GPIO PIN_IRQ.
- * Display frequency on two 15 LEDs bargraph, and string on a third 6 LEDs bargraph
- * 
- * Some adjustments to PRECISION constants still to be made
+ * @author Vincent Lacasse
+ * @date   2024-09-26
  */
 
 /*
@@ -301,10 +307,12 @@ int find_nearest_frequency(double cents)
 
 int main() {
     int string, status;
-    double frequency, cents, cents_delta;
+    double frequency = 0.0;
+    double cents;
+    double cents_delta;
 
     stdio_init_all();
-    printf("\nfreq_to_display\n");
+    printf("\nfrequency_irq_i2c\n");
 
     // Inititialize on board LED (live signal)
     init_led();     
@@ -377,7 +385,8 @@ int main() {
                 show_cents(I2C_ADDRESS_0, cents_delta, FREQ_BAR_GRAPH_COARSE_PREC);
                 show_cents(I2C_ADDRESS_1, cents_delta, FREQ_BAR_GRAPH_FINE_PREC);
                 set_bargraph(I2C_ADDRESS_2, 1<<string);
-                printf(" %8.2f  %d  %8.2f  %8.2f             \r", frequency, string, cents, cents_delta);
+                printf(" %8.2f  %d  %8.2f  %8.2f             \r", 
+                        frequency, string, cents, cents_delta);
                 break;
 
             case FREQ_NO_SIGNAL:

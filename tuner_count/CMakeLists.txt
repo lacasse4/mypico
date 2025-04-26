@@ -30,7 +30,13 @@ project(main C CXX ASM)
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(main main.c)
+add_executable(main 
+  main.c
+  ../util/accur.c
+  ../util/alpha.c
+  ../util/limit.c)
+
+include_directories(../util)
 
 pico_set_program_name(main "main")
 pico_set_program_version(main "0.1")
@@ -40,7 +46,7 @@ pico_enable_stdio_uart(main 1)
 pico_enable_stdio_usb(main 0)
 
 # Add the standard library to the build
-target_link_libraries(main pico_stdlib)
+target_link_libraries(main pico_stdlib hardware_i2c)
 
 # Add the standard include files to the build
 target_include_directories(main PRIVATE
