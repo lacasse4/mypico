@@ -1,9 +1,8 @@
 /**
- * @name autocorr
+ * @name tuner_acorr
  * @details
  * Simple bass/guitar tuner using an autocorrelation algorithm
- * Designed for a Raspberry pi Pico (original) 
- *  - runs on a Raspberry pi pico 1 w/ C/C++ SDK
+ *  - runs on a Raspberry pi pico 1 built w/ C/C++ SDK 1.5.1
  *  - uses ADC0 to sample a biased audio signal (0-3.3V).
  *  - outputs to console
  * 
