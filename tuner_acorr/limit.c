@@ -2,7 +2,6 @@
 #include "limit.h"
 
 struct limit {
-    int status;
     double pct;
     double target;
     double previous;
@@ -13,7 +12,6 @@ limit_t* create_limit(double pct, double target)
 {
     limit_t *limit = (limit_t *) malloc(sizeof(limit_t));
     if (!limit) return NULL;
-    limit->status = LIMIT_RESET;
     limit->pct = pct;
     limit->target = target;
     return limit;
@@ -32,17 +30,15 @@ int limit_check(limit_t *limit, double value)
     double gap  = value * limit->pct;
     double low  = value - gap;
     double high = value + gap;
-    return limit->target >= low && limit->target <= high;
+    if (limit->target >= low && limit->target <= high) return LIMIT_WITHIN;
+    return LIMIT_OUTSIDE;
 }
 
-// check if value is within limits, 
-// if not, switch target and reset limit_t
+// check if value is within limits, if not, set value as the new target
 int limit_next(limit_t *limit, double value)
 {
     if (!limit) return 0;
     int status = limit_check(limit, value);
-    if (!status) {
-        limit->target = value;
-    }
+    if (status == LIMIT_OUTSIDE) limit->target = value;
     return status;
 }

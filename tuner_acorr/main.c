@@ -1,11 +1,15 @@
 /**
  * @name autocorr
  * @details
- * Sample program to be used as a bass/guitar tuner using an autocorrelation algorythm
+ * Simple bass/guitar tuner using an autocorrelation algorithm
  * Designed for a Raspberry pi Pico (original) 
- * This program uses ADC0 to sample a biased audio signal (0-3.3V) that was analogicaly 
- * filtered by an 8 poles low pass filter set with a 1 KHz cut off frequency. 
+ *  - runs on a Raspberry pi pico 1 w/ C/C++ SDK
+ *  - uses ADC0 to sample a biased audio signal (0-3.3V).
+ *  - outputs to console
  * 
+ * @note  It is assumed that the input signal to ADC0 is analogicaly filtered 
+ * with an 8 poles low pass filter that is set with a 1 KHz cut off frequency. 
+ *
  * @author Vincent Lacasse
  * @date   2025-04-11
  */
@@ -13,16 +17,16 @@
 #include <stdio.h>
 #include <assert.h>
 
+// pico libraries
 #include "pico/stdlib.h"
 #include "hardware/adc.h"
 #include "hardware/dma.h"
 
+// various signal processing utilities 
 #include "accur.h"
 #include "alpha.h"
 #include "limit.h"
-
-// #include "data.h"
-// #include "E.h"
+#include "calibrate.h"
 
 /*
  * Basse guitar string frequencies in Hz
@@ -40,44 +44,69 @@
  * E4   329.63
  */
 
+// test data (analogicaly filtered)
+// #include "data.h" (100 Hz)
+// #include "E.h"    (from guitar)
+
+/*
+ * Calibration data gathered manually.
+ * It's to adjust the frequency for an observed
+ * but unexplained offset. A linear calibration is done
+ * via a least square estimation of the folling data:
+ *  
+ * |   fin  |  fout  |
+ * -------------------
+ * |  71.55 |  70.00 |  
+ * | 101.39 | 100.00 | 
+ * | 201.08 | 200.00 | 
+ * | 301.00 | 300.00 |
+ *  
+ */
+#define N_CALIB  4
+double x[] = { 71.55, 101.39, 201.08, 301.00 };
+double y[] = { 70.00, 100.00, 200.00, 300.00 };
+
 // Using ADC Channel 0 (GPIO26)
 #define ADC_CHANNEL 0
 
 /**
  * Sampling frequency:
- * With the Pico internal 48 MHz clock, this DIV.INT will result in a 10 KHz sampling rate.
- * This should be enough to cover the highest frequency we want to measure, 
- * that is E4 on a guitar (329.63 Hz). Thus, 10 KHz is 15 times higher than the Nyquist frequency.
+ * uning the Pico internal 48 MHz adc clock (clk_adc), DIV.INT will result in a 10 KHz 
+ * sampling frequency.
+ * This should be enough to cover the highest frequency to be measured, that is E4 
+ * on a guitar (329.63 Hz). Thus, 10 KHz is 15 times higher than the Nyquist frequency.
  * Note that the analog signal is filtered by a MAX7040 circuit (8 poles low pass filter) 
  * set up with a 1 KHz cut off frequency, in ordre to avoid signal aliasing.
  */
-#define ADC_DIVINT  4799
-#define SAMPLING_FREQUENCY 10000
+#define PICO_CLK_ACD        48000000    // in Hz
+#define SAMPLING_FREQUENCY  10000       // in Hz
+#define ADC_DIVINT          ((PICO_CLK_ACD/SAMPLING_FREQUENCY)-1)
 
 /**
  * Signal acquisition:
- * At a sampling rate of 10 KHz, using 1024 samples will result in a sampling period of 102.4 ms.
- * Thus the actual refresh time will be approximatly 100 ms or one tenth of a second.
- * The buffer length is determined by the lowest frequency we want to measure. 
- * That is E1 - 41.21 Hz from the electric bass.
- * We actually have to measure at lower frequencies since we have to expect an E1 string that 
- * is mistuned at a lower frequency. If we allow the lowest frequency to be, say, 35 Hz
- * then a buffer length of 1024 @ 10 KHz will cover over 3 cycles of 35 Hz signal which 
- * should be enough.
+ * With a 10 KHz sampling frequency, 1024 samples in a row are captured.
+ * This results in a sampling period of 102.4 ms.
+ * Thus, the current refresh time is approximatly a tenth of a second.
+ * The buffer length is determined by the lowest frequency to be measured, that is E1
+ * or 41.21 Hz from the electric bass.
+ * We actually have to measure at lower frequencies since we have to expect 
+ * an E1 string that is mistuned at a lower frequency. If we allow the lowest 
+ * frequency to be, say, 35 Hz then a buffer length of 1024 @ 10 KHz will cover 
+ * over 3 cycles of 35 Hz signal which should be more than enough.
  */
 #define SIGNAL_LEN  1024
 
-// maximum and minimum detection frequencies
+// maximum and minimum detectable frequencies
 #define MAX_FREQ    400     // in Hz
 #define MIN_FREQ    35      // in Hz
 
-// peak detection search limits in signal autocorrelation
+// peak detection search limits in acorr_find_first_peak()
 #define MIN_COUNT   (SAMPLING_FREQUENCY/MAX_FREQ)
 #define MAX_COUNT   (SAMPLING_FREQUENCY/MIN_FREQ)
 
-// variable thresholds and limits for peak detection
+// Variable thresholds and limits for peak detection
 // i.e. I have observed that the detection threshold should be 
-// set at a lower value when seaching lower frequency.
+// set at a lower value when seaching at lower frequencies.
 // These values were set empirically.
 #define HIGH_THRES      0.80
 #define MID_THRES       0.60
@@ -86,31 +115,43 @@
 #define LOW_MAX_FREQ    100     // in Hz
 #define MID_MIN_COUNT   (SAMPLING_FREQUENCY/MID_MAX_FREQ)
 #define LOW_MIN_COUNT   (SAMPLING_FREQUENCY/LOW_MAX_FREQ)
+
+// Minimum signal power to trigger peak detection
 #define MIN_POWER       50000
 
+// states for acorr_find_first_peak() state machine
 #define SET_THRESHOLD           0
 #define SEARCH_UP_AND_EXCEEDED  1
 #define SEARCH_DOWN             2
 #define PEAK_FOUND              3
 
+// acorr_find_first_peak() return statuses
 #define VALID        0
 #define LOW_COUNT   -1
 #define HIGH_COUNT  -2
 #define LOW_POWER   -3
 
-#define ALPHA       0.1
+// A one tap IIR filter is applied to the output frequency (alpha.c)
+// ALPHA is the IIR filter weight
+#define ALPHA       0.05
 
+// Accuracy target for accuracy and precision measurments (accur.c)
 #define ACCURACY_TARGET 200
+
+// A non-linear filter (limit.c) is used to discard output frequencies 
+// that are to far from the previously measured frequency.
+// MAX_FREQ_PCT is that maximum percentage allowed from the previous measurment.
 #define MAX_FREQ_PCT    0.10
 
 
 // for debugging
+int global_index;
+int counter = 0;
 uint32_t start_time;
 uint32_t gap;
 double global_power;
-int global_index;
-double global_acorr[3];
 double global_precise_index;
+
 
 // prototypes
 int init_data_acquisition(uint *dma_chan, dma_channel_config *cfg);
@@ -128,57 +169,75 @@ int main()
 {
     int detection_status;
     int statistic_status;
+
+    double accuracy;
+    double precision;
+    double frequency;
+    double filtered_frequency;
+    double corrected_frequency;
+
     uint dma_chan;
     dma_channel_config cfg;
     uint16_t signal[SIGNAL_LEN];
     accur_t *accur;
     alpha_t *alpha;
     limit_t *limit;
-    double accuracy;
-    double precision;
+    calibrate_t *calib; 
 
-    double frequency;
-    double filtered_frequency;
-    int counter = 0;
+    
 
+    // for printing to console
     stdio_init_all();
 
+    // create an accuracy and precision measurment object 
     accur = create_accur(10, ACCURACY_TARGET);
     assert(accur);
 
+    // create an IIR filter object
     alpha = create_alpha(ALPHA);
     assert(alpha);
 
+    // create a non-linear filtering object 
     limit = create_limit(MAX_FREQ_PCT, 0.0);
     assert(limit);
 
+    // create a calibration object
+    // initialize it with calibration data gathered manually
+    calib = create_calibrate(N_CALIB, x, y);
+    assert(calib);
+    
+    // initialize ADC
     init_data_acquisition(&dma_chan, &cfg);
 
     while (1) 
     {
-        start_time = time_us_32();
+        start_time = time_us_32();                          // debug
 
+        // acquire SIGNAL_LEN samples in 'signal'
         get_signal(dma_chan, cfg, signal);
 
+        // measure signal fundamental frequency
         detection_status = measure_frequency(signal, &frequency);
 
-        gap = time_us_32() - start_time;
+        gap = time_us_32() - start_time;                    // debug
 
-        // Print measured frequency if valid
-        // printf("  sec: %5.3lf  pow: %6.0lf", (double)gap/1000000, global_power);
+        // printf("  sec: %5.3lf  pow: %6.0lf", (double)gap/imit->status = LIMIT_RESET;1000000, global_power);
 
-        printf("%5d", counter++);
+        printf("%5d", counter++);                           // debug
+
+        // print measured frequency if valid
         if (detection_status == VALID) {
 
             printf("  frq: %6.2lf", frequency);
-            printf("  idx: %d", global_index);
-            printf("  pdx: %6.2lf", global_precise_index);
+            printf("  idx: %d", global_index);              // debug
+            printf("  pdx: %6.2lf", global_precise_index);  // debug
 
             if (limit_next(limit, frequency)) { 
                 filtered_frequency = alpha_filter(alpha, frequency);
-                printf("  flt: %6.2lf", filtered_frequency);
+                corrected_frequency = calibrate_getY(calib, filtered_frequency);
+                printf("  flt: %6.2lf", corrected_frequency);
 
-                statistic_status = accur_add(accur, filtered_frequency);
+                statistic_status = accur_add(accur, corrected_frequency);
                 if (statistic_status == ACCUR_OK) {
                     statistic_status = accur_results(accur, &accuracy, &precision);
                     printf("  acc: % -4.2lf", accuracy);
@@ -200,6 +259,7 @@ int main()
     release_accur(accur);
     release_alpha(alpha);
     release_limit(limit);
+    release_calibrate(calib);
 }
 
 
@@ -295,9 +355,6 @@ int measure_frequency(uint16_t *signal_in, double *frequency)
 
     status = acorr_find_first_peak(unbiased_signal, acorr, &index);
     global_index = index;
-    global_acorr[0] = acorr[index-1];
-    global_acorr[1] = acorr[index];
-    global_acorr[2] = acorr[index+1];
 
     *frequency = 0.0;
     if (status == VALID) {

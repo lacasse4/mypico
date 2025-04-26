@@ -1,8 +1,8 @@
 #ifndef _LIMIT_H
 #define _LIMIT_H
 
-#define LIMIT_STABLE      0
-#define LIMIT_RESET       1
+#define LIMIT_OUTSIDE   0
+#define LIMIT_WITHIN    (!LIMIT_OUTSIDE)  
 
 typedef struct limit limit_t;
 
