@@ -49,14 +49,14 @@
 #define MAX_FREQ_PCT    0.10
 
 // number of falling edges counted to evaluate PIN_IRQ frequency
-#define LEN 10  
+#define ESTIMATION_LENGTH 10  
 
 // frequency detection parameters
 #define MAX_FREQ    400         // in Hz
 #define MIN_FREQ    75          // in Hz
 #define TIMER_FREQ  1000000     // in Hz
-#define MAX_PERIOD_US  (LEN*TIMER_FREQ/MIN_FREQ)
-#define MIN_PERIOD_US  (LEN*TIMER_FREQ/MAX_FREQ)
+#define MAX_PERIOD_US  (ESTIMATION_LENGTH*TIMER_FREQ/MIN_FREQ)
+#define MIN_PERIOD_US  (ESTIMATION_LENGTH*TIMER_FREQ/MAX_FREQ)
 #define SLEEP_TIME_MS 200  // must be physically greater than MAX_PERIOD_US
 #if SLEEP_TIME_MS*1000 <= MAX_PERIOD_US
     #warning SLEEP_TIME_MS must be physically greater than MAX_PERIOD_US
@@ -82,13 +82,13 @@ static volatile int counter;
 // To check the counter status, call is_counter_done()
 void irq_counter(uint gpio, uint32_t events) 
 {
-    if (irq_state == COUNTER_DONE) return;
-
     uint32_t time_stamp = time_us_32();
+
+    if (irq_state == COUNTER_DONE) return;
 
     if (irq_state == COUNTER_COUNTING) {
         counter++;
-        if (counter == LEN) {
+        if (counter == ESTIMATION_LENGTH) {
             period = time_stamp - start;
             irq_state = COUNTER_DONE;
         }
@@ -190,7 +190,7 @@ int main() {
         // Update displays if the the evaluation of 'period' is done
         printf("  %d", alive++);
         if (is_counter_done()) {
-            frequency = LEN * 1000000.0 / period;
+            frequency = ESTIMATION_LENGTH * 1000000.0 / period;
             printf("  freq: %6.2lf", frequency);
             if (limit_next(limit, frequency)) { 
                 filtered_frequency = alpha_filter(alpha, frequency);
