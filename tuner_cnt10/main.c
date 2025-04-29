@@ -33,6 +33,7 @@
 #include <assert.h>
 #include "pico/stdlib.h"
 #include "hardware/gpio.h"
+#include "pico/critical_section.h"
 
 #include "accur.h"
 #include "alpha.h"
@@ -145,7 +146,7 @@ bool is_falling_edge_handler_done()
 
 // Get the frequency from falling_edge_handler() data
 // Note: check that is_falling_edge_handler_done() == FEH_DONE before performing this call.
-double get_frequency() 
+double get_frequency_from_handler() 
 {
     int state;
     uint32_t period;
@@ -177,41 +178,45 @@ void toggle_led()
     led_on = !led_on;
 }
 
-// ------------------
-int alive = 0;
-int statistic_status;
-double frequency;
-double filtered_frequency;
-double accuracy;
-double precision;
 
-accur_t *accur;
+bool timer_elapsed = false;
+bool data_valid = false;
+double global_frequency;
 alpha_t *alpha;
 limit_t *limit;
 
+critical_section_t crit_sec;
+struct repeating_timer timer;
 
 bool repeating_timer_callback(__unused struct repeating_timer *t) 
 {
-    printf("  %d", alive++);
-    if (is_falling_edge_handler_done()) {
-        frequency = get_frequency();
-        printf("  freq: %6.2lf", frequency);
-        if (limit_next(limit, frequency)) { 
+    double frequency; 
+    double filtered_frequency = 0.0;
+    bool local_data_valid;
+
+    critical_section_enter_blocking(&crit_sec);
+    data_valid = false;
+    timer_elapsed = false;
+    global_frequency = 0.0;
+    critical_section_exit(&crit_sec);
+
+    local_data_valid = is_falling_edge_handler_done();
+    if (local_data_valid) {
+        frequency = get_frequency_from_handler();
+        local_data_valid = limit_next(limit, frequency);
+        if (local_data_valid) { 
             filtered_frequency = alpha_filter(alpha, frequency);
-            printf("  filt: %6.2lf", filtered_frequency);
-            statistic_status = accur_add(accur, filtered_frequency);
-            if (statistic_status == ACCUR_OK) {
-                accur_results(accur, &accuracy, &precision);
-                printf("  acc: % -5.3lf", accuracy);
-                printf("  prc: %5.3lf", precision);
-            }
         }
         else {
             alpha_reset(alpha);
-            accur_flush(accur);
         }
     }
-    printf("\n");
+
+    critical_section_enter_blocking(&crit_sec);
+    data_valid = local_data_valid;
+    timer_elapsed = true;
+    if (data_valid) global_frequency = filtered_frequency;
+    critical_section_exit(&crit_sec);
 
     // start next detection round of falling edges on INPUT_PIN
     arm_falling_edge_handler();
@@ -222,10 +227,67 @@ bool repeating_timer_callback(__unused struct repeating_timer *t)
     return true;
 }
 
+void init_repeating_timer() 
+{
+    timer_elapsed = false;
+    data_valid = false;
+
+    critical_section_init(&crit_sec);
+    add_repeating_timer_ms(-SLEEP_TIME_MS, repeating_timer_callback, NULL, &timer);
+
+    // create an IIR filter object
+    alpha = create_alpha(ALPHA);
+    assert(alpha);
+
+    // create a non-linear filtering object 
+    limit = create_limit(MAX_FREQ_PCT, 0.0);
+    assert(limit);
+}
+
+void release_repeating_timer() {
+    critical_section_deinit(&crit_sec);
+    cancel_repeating_timer(&timer);
+    release_alpha(alpha);
+    release_limit(limit);
+}
+
+bool is_timer_complete() 
+{
+    bool local_timer_elasped;
+
+    critical_section_enter_blocking(&crit_sec);
+    local_timer_elasped = timer_elapsed;
+    critical_section_exit(&crit_sec);
+
+    return local_timer_elasped;
+}
+
+bool get_filtered_frequency(double *frequency) 
+{
+    bool local_data_valid;
+
+    critical_section_enter_blocking(&crit_sec);
+    local_data_valid = data_valid;
+    *frequency = global_frequency;
+    data_valid = false;
+    timer_elapsed = false;
+    global_frequency = 0.0;
+    critical_section_exit(&crit_sec);
+
+    return local_data_valid;
+}
+
 
 // program entry point
 int main() {
-    struct repeating_timer timer;
+    int alive = 0;
+    bool data_valid;
+    int statistic_status;
+    double frequency;
+    double accuracy;
+    double precision;
+    accur_t *accur;
+
 
     stdio_init_all();
 
@@ -248,7 +310,30 @@ int main() {
     init_falling_edge_handler(); 
 
     // Set a repeating alarm that is called at each SLEEP_TIME_US
-    add_repeating_timer_ms(-SLEEP_TIME_MS, repeating_timer_callback, NULL, &timer);
+    init_repeating_timer();
 
-    while (true);
+    while (true) {
+        
+        if (is_timer_complete()) {
+
+            printf("  %5d", alive++);
+            data_valid = get_filtered_frequency(&frequency);
+            if (data_valid) {
+                printf("  filt: %6.2lf", frequency);
+                statistic_status = accur_add(accur, frequency);
+                if (statistic_status == ACCUR_OK) {
+                    accur_results(accur, &accuracy, &precision);
+                    printf("  acc: % -5.3lf", accuracy);
+                    printf("  prc: %5.3lf", precision);
+                }
+            }
+            else {
+                accur_flush(accur);
+            }
+            printf("\n");
+        }
+    }
+
+    release_accur(accur);
+    release_repeating_timer();
 }
