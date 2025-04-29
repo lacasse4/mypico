@@ -32,6 +32,8 @@ project(main C CXX ASM)
 
 add_executable(main 
   main.c
+  fedge.c
+  rtimer.c
   ../util/accur.c
   ../util/alpha.c
   ../util/limit.c)
