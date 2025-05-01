@@ -116,6 +116,8 @@ int main() {
         if (is_rtimer_complete()) {
 
             printf("  %5d", alive++);
+            toggle_led();
+
             data_valid = get_rtimer_frequency(&frequency);
             if (data_valid) {
                 printf("  filt: %6.2lf", frequency);
@@ -131,7 +133,6 @@ int main() {
             }
             printf("\n");
         }
-        toggle_led();
     }
 
     release_accur(accur);
