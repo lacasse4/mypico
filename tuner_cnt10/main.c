@@ -65,7 +65,7 @@
 #endif
 
 // Accuracy target for accuracy and precision measurments (accur.c)
-#define ACCURACY_TARGET 200
+#define ACCURACY_TARGET 209.644  // 555 astable test circuit
 
 // variables used to switch the Pico on board LED (alive signal)
 const uint LED_PIN = PICO_DEFAULT_LED_PIN;
