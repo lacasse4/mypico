@@ -3,6 +3,7 @@
 
 #define LIMIT_OUTSIDE   0
 #define LIMIT_WITHIN    (!LIMIT_OUTSIDE)  
+#define FIRST_TIME      0
 
 typedef struct limit limit_t;
 

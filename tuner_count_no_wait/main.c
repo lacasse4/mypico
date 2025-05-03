@@ -1,10 +1,13 @@
 /**
- * @name tuner_count
+ * @name tuner_count_no_wait
  * @details
  * Simple bass/guitar tuner using an zero crossing algorithm
  *  - runs on a Raspberry pi pico 1 built w/ C/C++ SDK 1.5.1
  *  - detects fallings edges on GPIO 14 (INPUT_PIN) for frequency estimation 
  *  - ouptuts to console 
+ * 
+ * This is an improvement over tuner_count program:
+ *  - the falling edge counter status is also checked in order to improve the measurement speed
  * 
  * @note  It is assumed that the input signal is analogicaly filtered 
  * with an 8 poles low pass filter that is set with a 1 KHz cut off frequency. 
@@ -79,7 +82,6 @@ void toggle_led()
 // Program entry point
 int main() {
     int alive = 0;
-    bool data_valid;
     int statistic_status;
     double frequency;
     double accuracy;
@@ -106,8 +108,7 @@ int main() {
             printf("  %5d", alive++);
             toggle_led();
 
-            data_valid = get_frequency(&frequency);
-            if (data_valid) {
+            if (get_frequency(&frequency)) {
                 printf("  filt: %6.2lf", frequency);
                 statistic_status = accur_add(accur, frequency);
                 if (statistic_status == ACCUR_OK) {

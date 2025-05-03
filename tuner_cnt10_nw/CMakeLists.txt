@@ -33,7 +33,7 @@ project(main C CXX ASM)
 add_executable(main 
   main.c
   fedge.c
-  rtimer.c
+  fdetect.c
   ../util/accur.c
   ../util/alpha.c
   ../util/limit.c)
@@ -48,7 +48,7 @@ pico_enable_stdio_uart(main 1)
 pico_enable_stdio_usb(main 0)
 
 # Add the standard library to the build
-target_link_libraries(main pico_stdlib hardware_i2c)
+target_link_libraries(main pico_stdlib)
 
 # Add the standard include files to the build
 target_include_directories(main PRIVATE

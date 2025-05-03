@@ -1,0 +1,4 @@
+ * This program is an enhancement of tuner_count. 
+ * The algorithm has LENGTH slot for time counting.
+ * This improves the refresh rate (increased 10 fold).  
+ * 
