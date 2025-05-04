@@ -17,16 +17,6 @@
  * @date   2025-05-04
  */
 
-/*
- * Guitar string frequencies in Hz
- * E2   82.41
- * A2   110
- * D3   146.83
- * G3   196
- * B3   246.94
- * E4   329.63
- */
-
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -62,6 +52,16 @@
 #define NUM_STRING      6           // number of strings on a guitar
 #define BASE_FREQUENCY  220.0       // base frequency (A3) used to calculate cents
 #define LABEL_LEN       3
+
+/*
+ * Guitar string frequencies in Hz
+ * E2   82.41
+ * A2   110
+ * D3   146.83
+ * G3   196
+ * B3   246.94
+ * E4   329.63
+ */
 
 // strings cents relative to BASE_FREQUENCY
 double string_cents[NUM_STRING] = {
@@ -102,19 +102,20 @@ int find_closest_string(double cents)
     return string;
 }
 
-// Compute cents value of a frequency from BASE_FREQUENCY
+// Compute cents value of a frequency relative to BASE_FREQUENCY
 double get_cents(double frequency)
 {
     return 1200.0 * logf(frequency/BASE_FREQUENCY) / M_LN2;
 }
 
-#define DISPLAY_LEN     51
-#define BLANK           "                                                                           "
+#define DISPLAY_LEN     101
+#define BLANK           "                                                                                                    "
 #define MID_POS         (DISPLAY_LEN/2)
 #define DISP_FACTOR     ((DISPLAY_LEN-1)/500.0)
 
 void show_frequency(double frequency)
 {
+    int i;
     char    s[1000];
     char    t[1000];
     double  cents = get_cents(frequency);
@@ -123,12 +124,19 @@ void show_frequency(double frequency)
 
     strcpy(s, BLANK);
     if (rel_to_mid < 0) {
-        if (rel_to_mid - rel_to_mid < 0) return;
-        for (int i = MID_POS-rel_to_mid; i < MID_POS; i++)    s[i] = '*';
+        if (MID_POS + rel_to_mid < 0) return;
+        for (i = MID_POS+rel_to_mid; i < MID_POS; i++) {
+            s[i] = '*';
+        }
     }
     else if (rel_to_mid > 0) {
-        if (rel_to_mid + rel_to_mid > DISPLAY_LEN) return;
-        for (int i = MID_POS+1; i <= MID_POS+rel_to_mid; i++) s[i] = '*';
+        if (MID_POS + rel_to_mid > DISPLAY_LEN) return;
+        for (i = MID_POS+1; i <= MID_POS+rel_to_mid; i++) {
+            s[i] = '*';
+        }
+    }
+    else {
+        s[MID_POS] = '*';
     }
 
     s[MID_POS] = '|';
