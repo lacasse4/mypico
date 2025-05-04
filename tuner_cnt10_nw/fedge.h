@@ -3,9 +3,6 @@
 
 #include "pico/stdlib.h"
 
-// number of period summed between falling edges to evaluate frequency
-#define LENGTH      50
-
 // fedge_handler() states 
 #define FEH_IDLE     0
 #define FEH_LOADING  1

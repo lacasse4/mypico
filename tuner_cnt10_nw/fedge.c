@@ -17,10 +17,11 @@
  * @author Vincent Lacasse
  * @date   2025-05-02
  */
-#include <stdio.h>
+
 #include "pico/stdlib.h"
 #include "hardware/gpio.h"
 
+#include "fdetect.h"
 #include "fedge.h"
 
 #define SLOTS (LENGTH+1)
@@ -71,7 +72,7 @@ void fedge_handler(uint gpio, uint32_t events)
 }
 
 // Get the frequency from falling_edge_handler() data
-// Note: fedge_is_done() == FEH_DATA_OK must be check before performing this call.
+// Note: fedge_is_read_ok() must be true before performing this call.
 double fedge_get_frequency() 
 {
     uint32_t period;
@@ -82,6 +83,7 @@ double fedge_get_frequency()
     state = FEH_COUNTING;
     gpio_set_irq_enabled (input_pin, GPIO_IRQ_EDGE_FALL, true);
 
+    // RP2040 system timer runs ar 1 MHz
     return LENGTH * 1000000.0 / period;
 }
 

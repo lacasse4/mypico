@@ -11,5 +11,5 @@ limit_t* create_limit(double pct, double target);
 void     release_limit(limit_t *limit);
 int      limit_check(limit_t *limit, double value);
 int      limit_next(limit_t *limit, double value);
-
+void    limit_reset(limit_t *limit);
 #endif

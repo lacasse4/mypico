@@ -4,7 +4,7 @@
 struct limit {
     double pct;
     double target;
-    double previous;
+    // double previous;
     int status;
 };
 
@@ -40,11 +40,17 @@ int limit_check(limit_t *limit, double value)
 int limit_next(limit_t *limit, double value)
 {
     if (!limit) return 0;
-    int status = limit_check(limit, value);
-    if (status == LIMIT_OUTSIDE) limit->target = value;
     if (limit->status == FIRST_TIME) {
         limit->status = !FIRST_TIME;
+        limit->target = value;
         return LIMIT_WITHIN;
     } 
+    int status = limit_check(limit, value);
+    if (status == LIMIT_OUTSIDE) limit->target = value;
     return status;
+}
+
+void limit_reset(limit_t *limit)
+{
+    limit->status = FIRST_TIME;
 }

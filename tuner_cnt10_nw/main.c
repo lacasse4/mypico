@@ -57,10 +57,11 @@
 #define TIMER_FREQ      1000000     // in Hz
 #define MAX_PERIOD_US  (LENGTH*TIMER_FREQ/MIN_FREQ)
 #define MIN_PERIOD_US  (LENGTH*TIMER_FREQ/MAX_FREQ)
-#define SLEEP_TIME_MS   200   // must be physically greater than MAX_PERIOD_US
-#if SLEEP_TIME_MS*1000 <= MAX_PERIOD_US
-    #warning SLEEP_TIME_MS must be physically greater than MAX_PERIOD_US
+#define SLEEP_TIME_MS   300   // must be physically greater than MAX_PERIOD_US
+#if (SLEEP_TIME_MS*1000) <= MAX_PERIOD_US
+    #error SLEEP_TIME_MS must be physically greater than MAX_PERIOD_US
 #endif
+
 
 // Accuracy target for accuracy and precision measurments (accur.h)
 #define ACCURACY_TARGET 214.60  // to fit a 555 astable test circuit
@@ -81,10 +82,16 @@ void toggle_led()
     led_on = !led_on;
 }
 
+void print_invalid()
+{
+    static char c[4] = {'|', '/', '-', '\\'};
+    static int i = 0;
+    printf("     %c  no signal  %c       ", c[i], c[i]);
+    i = (i +1) % 4;
+}
 
 // Program entry point
 int main() {
-    int alive = 0;
     int statistic_status;
     double frequency;
     double accuracy;
@@ -109,22 +116,22 @@ int main() {
         
         if (fdetect_is_ready()) {
 
-            printf("  %5d  ", alive++);
             toggle_led();
 
             if (fdetect_get_frequency(&frequency)) {
-                printf("  filt: %6.2lf", frequency);
+                printf("  f: %6.2lf", frequency);
                 statistic_status = accur_add(accur, frequency);
                 if (statistic_status == ACCUR_OK) {
                     accur_results(accur, &accuracy, &precision);
-                    printf("  acc: % -5.3lf", accuracy);
-                    printf("  prc: %5.3lf", precision);
+                    // printf("  acc: % -5.3lf", accuracy);
+                    printf("  p: %6.4lf", precision);
                 }
             }
             else {
+                print_invalid();
                 accur_flush(accur);
             }
-            printf("\n");
+            printf("\r");
         }
     }
 

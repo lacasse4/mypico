@@ -22,8 +22,6 @@
  * @date   2025-05-02
  */
 
-#include <stdio.h>
-
 #include "fdetect.h"
 #include "fedge.h"
 #include "alpha.h"
@@ -104,6 +102,11 @@ bool fdetect_get_frequency(double *frequency)
             fedge_launch();
             alpha_reset(alpha);
         }
+    }
+    else {
+        fedge_launch();
+        limit_reset(limit);
+        alpha_reset(alpha);
     }
 
     // set timer to react if there no signal on input_pin
