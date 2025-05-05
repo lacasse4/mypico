@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "lcd_1in14.h": "c",
+        "math.h": "c"
+    }
+}

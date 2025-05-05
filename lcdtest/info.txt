@@ -1,0 +1,4 @@
+https://www.waveshare.com/pico-lcd-1.14.htm
+https://www.waveshare.com/wiki/Pico-LCD-1.14
+
+cmake -DPICO_BOARD=pico -DPICO_PLATFORM=rp2040 ..
