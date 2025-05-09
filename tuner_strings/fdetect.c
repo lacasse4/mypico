@@ -74,9 +74,20 @@ void fdetect_release()
 }
 
 // check if the timer has elapsed
-bool fdetect_is_ready() 
+bool fdetect_is_read_ok() 
 {
-    return timer_elapsed || fedge_is_read_ok();
+    return fedge_is_read_ok();
+}
+
+// check if the timer has elapsed
+bool fdetect_is_timer_elapsed() 
+{
+    return timer_elapsed;
+}
+
+bool fdetect_no_falling_edge() 
+{
+    return fedge_no_falling_edge();
 }
 
 // get the estimated frequency. The frequency value is valid if true is returned.
@@ -91,17 +102,11 @@ bool fdetect_get_frequency(double *frequency)
     // cancel the timer alarm
     cancel_alarm(alarm_id);
 
-    // if the falling edge handler is done, a frequency is available
-    if (fedge_is_read_ok()) {
-        raw_frequency = fedge_get_frequency();
-        if (limit_next(limit, raw_frequency)) { 
-            *frequency = alpha_filter(alpha, raw_frequency);
-            data_valid = true;
-        }
-        else {
-            fedge_launch();
-            alpha_reset(alpha);
-        }
+    // get frequency
+    raw_frequency = fedge_get_frequency();
+    if (limit_next(limit, raw_frequency)) { 
+        *frequency = alpha_filter(alpha, raw_frequency);
+        data_valid = true;
     }
     else {
         fedge_launch();
@@ -112,6 +117,15 @@ bool fdetect_get_frequency(double *frequency)
     // set timer to react if there no signal on input_pin
     set_timer();
     return data_valid;
+}
+
+void fdetect_reset_search()
+{
+    cancel_alarm(alarm_id);
+    fedge_launch();
+    limit_reset(limit);
+    alpha_reset(alpha);
+    set_timer();
 }
 
 void set_timer() 

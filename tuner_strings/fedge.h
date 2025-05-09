@@ -15,6 +15,7 @@
 void fedge_init(uint input_pin, int length);
 void fedge_launch();
 bool fedge_is_read_ok();
+bool fedge_no_falling_edge();
 double fedge_get_frequency();
 
 #endif

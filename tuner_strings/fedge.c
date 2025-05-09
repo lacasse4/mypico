@@ -118,3 +118,11 @@ bool fedge_is_read_ok()
 {
     return state == FEH_READ_OK;
 }
+
+bool fedge_no_falling_edge()
+{
+    return counter == 0;
+    // gpio_set_irq_enabled (input_pin, GPIO_IRQ_EDGE_FALL, false);
+
+    // gpio_set_irq_enabled (input_pin, GPIO_IRQ_EDGE_FALL, true);
+}

@@ -1,5 +1,5 @@
 /**
- * @name tuner_string
+ * @name tuner_strings
  * @details
  * Simple bass/guitar tuner using an zero crossing algorithm
  *  - runs on a Raspberry pi pico 1 built w/ C/C++ SDK 1.5.1
@@ -45,22 +45,14 @@
 // MAX_FREQ_PCT is that maximum percentage allowed from the previous measurment.
 #define MAX_FREQ_PCT    0.05
 
-// frequency detection parameters
-#define MAX_FREQ        400         // in Hz
-#define MIN_FREQ        75          // in Hz
-#define TIMER_FREQ      1000000     // in Hz
-#define MAX_PERIOD_US  (LENGTH*TIMER_FREQ/MIN_FREQ)
-#define MIN_PERIOD_US  (LENGTH*TIMER_FREQ/MAX_FREQ)
-#define SLEEP_TIME_MS   300   // sleep time must be greater than the maximum period to be measured
-#if (SLEEP_TIME_MS*1000) <= MAX_PERIOD_US
-    #error Sleep time must be greater than the maximum period to be measured
-#endif
-
-#define NUM_STRING      6           // number of strings on a guitar
-#define BASE_FREQUENCY  220.0       // base frequency (A3) used to calculate cents
-#define LABEL_LEN       3
-
 /*
+ * Basse guitar string frequencies in Hz
+ * B0   30.87
+ * E1   41.21
+ * A1   55.00
+ * D2   74.42
+ * G2   98.00
+ * 
  * Guitar string frequencies in Hz
  * E2   82.41
  * A2   110
@@ -70,8 +62,26 @@
  * E4   329.63
  */
 
-// strings cents relative to BASE_FREQUENCY
-double string_cents[NUM_STRING] = {
+// frequency detection parameters
+#define MAX_FREQ        400         // in Hz based on guitar high string
+#define MIN_FREQ        25          // in Hz based on bass guitar low string
+#define TIMER_FREQ      1000000     // in Hz
+#define MAX_PERIOD_US  (LENGTH*TIMER_FREQ/MIN_FREQ)
+#define MIN_PERIOD_US  (LENGTH*TIMER_FREQ/MAX_FREQ)
+#define SLEEP_TIME_MS   801   // sleep time must be greater than the maximum period to be measured
+#if (SLEEP_TIME_MS*1000) <= MAX_PERIOD_US
+    #error Sleep time must be greater than the maximum period to be measured
+#endif
+
+#define BASS                0
+#define GUITAR              1
+#define NUM_STRING_GUITAR   6           // number of strings on a guitar
+#define NUM_STRING_BASS     5           // number of strings on a bass
+#define BASE_FREQUENCY      220.0       // base frequency (A3) used to calculate cents
+#define LABEL_LEN           3
+
+// strings cents relative to BASE_FREQ_GUITAR
+double guitar_string_cents[NUM_STRING_GUITAR] = {
     -1700.0,    // E2
     -1200.0,    // A2
      -700.0,    // D3
@@ -80,7 +90,7 @@ double string_cents[NUM_STRING] = {
      +700.0     // E4
 };
 
-char string_label[NUM_STRING][LABEL_LEN+1] = {
+char guitar_string_label[NUM_STRING_GUITAR][LABEL_LEN+1] = {
     "E2 ",
     "A2 ",
     "D3 ",
@@ -89,15 +99,40 @@ char string_label[NUM_STRING][LABEL_LEN+1] = {
     "E4 "
 };
 
+// strings cents relative to BASE_FREQ_BASS
+double bass_string_cents[NUM_STRING_BASS] = {
+    -3400.0,    // B0
+    -2900.0,    // E1
+    -2400.0,    // A1
+    -1900.0,    // D2
+    -1400.0     // G2
+};
+
+char bass_string_label[NUM_STRING_BASS][LABEL_LEN+1] = {
+    "B0 ",
+    "E1 ",
+    "A1 ",
+    "D2 ",
+    "G2 "
+};
 
 // Return the string that is the nearest the specified cents value
-// String 0 is the low E, string 1 is A, on so on to string 5 (high E)
-int find_closest_string(double cents)
+// Guitar: string 0 is the low E2, string 1 is A2, up to string 5 (E4)
+// Bass:   string 0 is the low B0, string 2 is E1, up to string 4 (G2) 
+int find_closest_string(int instrument, double cents)
 {
     int i;
     double diff;
     int string;
     double min_diff = DBL_MAX;  // set to very large value
+    double *string_cents;
+
+    if (instrument == BASS) {
+        string_cents = bass_string_cents;
+    }
+    else {
+        string_cents = guitar_string_cents;
+    }
 
     for (i = 0; i < 6; i++) {
         diff = fabs(cents - string_cents[i]);
@@ -126,8 +161,8 @@ void show_frequency(double frequency)
     char    s[1000];
     char    t[1000];
     double  cents = get_cents(frequency);
-    int     string = find_closest_string(cents);
-    int     rel_to_mid = round((cents - string_cents[string])*DISP_FACTOR);
+    int     string = find_closest_string(GUITAR, cents);
+    int     rel_to_mid = round((cents - guitar_string_cents[string])*DISP_FACTOR);
 
     strcpy(s, BLANK);
     if (rel_to_mid < 0) {
@@ -148,7 +183,7 @@ void show_frequency(double frequency)
 
     s[MID_POS] = '|';
     s[DISPLAY_LEN+1] = '\0';
-    strcpy(t, string_label[string]);
+    strcpy(t, guitar_string_label[string]);
     strcat(t, s);
     printf("%s", t);
 }
@@ -174,11 +209,13 @@ void toggle_led()
 #define TOO_LOW     "  TOO LOW  "
 #define TOO_HIGH    "  TOO HIGH "
 #define NO_SIGNAL   " NO SIGNAL "
+#define DETECTING   " DETECTING "
 void print_invalid(char *s)
 {
     static char c[4] = {'|', '/', '-', '\\'};
     static int i = 0;
-    printf("     %c  %s  %c %60s", c[i], s, c[i], " ");
+    printf("     %c  %s  %c  ", c[i], s, c[i]);
+    printf("        \r");
     i = (i +1) % 4;
 }
 
@@ -199,10 +236,21 @@ int main() {
     sleep_ms(100);  // it seems that the internal timer takes some time to startup.
     fdetect_init(INPUT_PIN, LENGTH, SLEEP_TIME_MS, ALPHA, MAX_FREQ_PCT);
 
+    print_invalid(DETECTING);
+    printf("        \r");
+
     while (true) {
         
-        if (fdetect_is_ready()) {
-
+        if (fdetect_is_timer_elapsed()) {
+            if (fdetect_no_falling_edge()) {
+                print_invalid(NO_SIGNAL);   
+            }
+            else {
+                print_invalid(TOO_LOW);
+            }
+            fdetect_reset_search();
+        }
+        else if (fdetect_is_read_ok()) {
 
             status = fdetect_get_frequency(&frequency);
             elapsed_time =  time_us_32() - start_time;
@@ -210,23 +258,20 @@ int main() {
             toggle_led();
 
             if (status) {
-                if (frequency < MIN_FREQ) {
-                    print_invalid(TOO_LOW);
-                }
-                else if (frequency > MAX_FREQ) {
+                if (frequency > MAX_FREQ) {
                     print_invalid(TOO_HIGH);
                 }
                 else {
-                    show_frequency(frequency);
+                    // show_frequency(frequency);
                     printf("  %7.3lf", frequency);
+                    printf("  %lu   ", elapsed_time);
+                    printf("        \r");
                 }
             }
             else {
-                print_invalid(NO_SIGNAL);
+                print_invalid(DETECTING);
             }
 
-            printf("  %lu   ", elapsed_time);
-            printf("\r");
             
             start_time = time_us_32();
         }
