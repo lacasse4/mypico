@@ -24,15 +24,17 @@
 #include "fdetect.h"
 #include "fedge.h"
 
-#define SLOTS (LENGTH+1)
+#define MAX_SLOTS (MAX_LENGTH+1)  // we need MAX_LENGTH+1 slots (time stamps) to measure MAX_LENGTH periods
 
 // variables used in fedge_handler()
 static volatile int state;       
-static volatile uint32_t time_stamp[SLOTS] = {0};  // we need LENGTH+1 time stamps to measure LENGTH periods 
+static volatile uint32_t time_stamp[MAX_SLOTS] = {0};   
 static volatile int last;
 static volatile int first;
 static volatile int counter;
 static uint input_pin;
+static int length;
+static int slots;
 
 // Interrupt handler on input_pin. Detects the period between falling edges.
 // - to initialize the module, call fedge_init()
@@ -49,21 +51,21 @@ void fedge_handler(uint gpio, uint32_t events)
     if (state == FEH_IDLE) return;
 
     if (state == FEH_READ_OK) {
-        first = (first+1) % SLOTS;
-        last  = (last+1)  % SLOTS;
+        first = (first+1) % slots;
+        last  = (last+1)  % slots;
         time_stamp[last] = now;
     }
 
     if (state == FEH_COUNTING) {
-        first = (first+1) % SLOTS;
-        last  = (last+1)  % SLOTS;
+        first = (first+1) % slots;
+        last  = (last+1)  % slots;
         time_stamp[last] = now;
         state = FEH_READ_OK;
     }
 
     if (state == FEH_LOADING) {
         time_stamp[counter++] = now;
-        if (counter == SLOTS) {
+        if (counter == slots) {
             state = FEH_READ_OK;
         }
     }
@@ -71,7 +73,7 @@ void fedge_handler(uint gpio, uint32_t events)
     gpio_set_irq_enabled (input_pin, GPIO_IRQ_EDGE_FALL, true);
 }
 
-// Get the frequency from falling_edge_handler() data
+// Get frequency from falling_edge_handler() data
 // Note: fedge_is_read_ok() must be true before performing this call.
 double fedge_get_frequency() 
 {
@@ -84,31 +86,34 @@ double fedge_get_frequency()
     gpio_set_irq_enabled (input_pin, GPIO_IRQ_EDGE_FALL, true);
 
     // RP2040 system timer runs ar 1 MHz
-    return LENGTH * 1000000.0 / period;
+    return length * 1000000.0 / period;
 }
 
-// Setup the interrupt handler on input_pin
-void fedge_init(uint _input_pin) 
+// Init variables and setup interrupt handler on input_pin
+void fedge_init(uint _input_pin, int _length) 
 {
     input_pin = _input_pin;
+    length = _length;
+    slots = _length + 1;
     state = FEH_IDLE;           // quiet at the beginning 
+
     gpio_set_input_enabled (input_pin, true);
     gpio_pull_up (input_pin);
     gpio_set_irq_enabled_with_callback(input_pin, GPIO_IRQ_EDGE_FALL, true, &fedge_handler);
 }
 
-// Arm the edge detector 
+// Arm edge detector 
 void fedge_launch() 
 {
     gpio_set_irq_enabled (input_pin, GPIO_IRQ_EDGE_FALL, false);
-    last = LENGTH;
+    last = length;
     first = 0;
     counter = 0;
     state = FEH_LOADING;
     gpio_set_irq_enabled (input_pin, GPIO_IRQ_EDGE_FALL, true);
 }
 
-// Check if we went though LENGTH falling edges
+// Check if we went though length+1 falling edges
 bool fedge_is_read_ok()
 {
     return state == FEH_READ_OK;

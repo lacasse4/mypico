@@ -25,9 +25,16 @@
 #include "pico/stdlib.h"
 
 #include "fdetect.h"
+#include "fedge.h"
 
 // GPIO pin on which zero crossing are detected
 #define INPUT_PIN       14
+
+// number of period summed between falling edges to evaluate frequency
+#define LENGTH          20
+#if LENGTH > MAX_LENGTH
+    #error LENGTH must be smaller or equal to MAX_LENGTH (fedge.h)
+#endif
 
 // A one tap IIR filter is applied to the output frequency (alpha.c)
 // ALPHA is the IIR filter weight
@@ -36,7 +43,7 @@
 // A non-linear filter (limit.c) is used to discard output frequencies 
 // that are to far from the previously measured frequency.
 // MAX_FREQ_PCT is that maximum percentage allowed from the previous measurment.
-#define MAX_FREQ_PCT    0.10
+#define MAX_FREQ_PCT    0.05
 
 // frequency detection parameters
 #define MAX_FREQ        400         // in Hz
@@ -44,9 +51,9 @@
 #define TIMER_FREQ      1000000     // in Hz
 #define MAX_PERIOD_US  (LENGTH*TIMER_FREQ/MIN_FREQ)
 #define MIN_PERIOD_US  (LENGTH*TIMER_FREQ/MAX_FREQ)
-#define SLEEP_TIME_MS   300   // must be physically greater than MAX_PERIOD_US
+#define SLEEP_TIME_MS   300   // sleep time must be greater than the maximum period to be measured
 #if (SLEEP_TIME_MS*1000) <= MAX_PERIOD_US
-    #error SLEEP_TIME_MS must be physically greater than MAX_PERIOD_US
+    #error Sleep time must be greater than the maximum period to be measured
 #endif
 
 #define NUM_STRING      6           // number of strings on a guitar
@@ -178,6 +185,9 @@ void print_invalid(char *s)
 // Program entry point
 int main() {
     double frequency;
+    int status;
+    uint32_t start_time = 0;
+    uint32_t elapsed_time;
 
     // initialize printing to console
     stdio_init_all();
@@ -187,15 +197,19 @@ int main() {
     
     // Set a repeating alarm that is called at each SLEEP_TIME_US
     sleep_ms(100);  // it seems that the internal timer takes some time to startup.
-    fdetect_init(INPUT_PIN, SLEEP_TIME_MS, ALPHA, MAX_FREQ_PCT);
+    fdetect_init(INPUT_PIN, LENGTH, SLEEP_TIME_MS, ALPHA, MAX_FREQ_PCT);
 
     while (true) {
         
         if (fdetect_is_ready()) {
 
+
+            status = fdetect_get_frequency(&frequency);
+            elapsed_time =  time_us_32() - start_time;
+
             toggle_led();
 
-            if (fdetect_get_frequency(&frequency)) {
+            if (status) {
                 if (frequency < MIN_FREQ) {
                     print_invalid(TOO_LOW);
                 }
@@ -204,13 +218,17 @@ int main() {
                 }
                 else {
                     show_frequency(frequency);
-                    printf("  %6.2lf", frequency);
+                    printf("  %7.3lf", frequency);
                 }
             }
             else {
                 print_invalid(NO_SIGNAL);
             }
+
+            printf("  %lu   ", elapsed_time);
             printf("\r");
+            
+            start_time = time_us_32();
         }
     }
 

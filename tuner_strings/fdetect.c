@@ -44,14 +44,14 @@ int64_t alarm_callback(alarm_id_t id, void *user_data)
 }
 
 // module initialisation. should be called first
-void fdetect_init(uint input_pin, int32_t sleep_time_ms_in, double weight, double max_pct) 
+void fdetect_init(uint input_pin, int length, int32_t sleep_time_ms_in, double weight, double max_pct) 
 {
     // an alarm timer is as a timeout mechanism if there is not signal on input_pin 
     sleep_time_ms = sleep_time_ms_in;   // store the time out internally
     set_timer();
 
     // initialize edge detection
-    fedge_init(input_pin); 
+    fedge_init(input_pin, length); 
 
     // launch edge detetion
     fedge_launch();
