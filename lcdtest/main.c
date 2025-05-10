@@ -110,18 +110,18 @@ double get_cents(double frequency)
 #define DISP_FACTOR     ((TUNER_LENGTH-1)/CENTS_SHOWN)
 #define WX0             (MID_POS-T_HALF_LENGTH)
 #define WX1             (MID_POS+T_HALF_LENGTH)
-#define WY0             40
-#define WY1             (WX0+TUNER_HEIGHT)
+#define WY0             20
+#define WY1             (WY0+TUNER_HEIGHT)
 #define TIC_LEN         5
-#define CENTS_LIMIT     10.0
+#define CENTS_LIMIT     20.0
 
-#define YPOS_DIRECT     (WY0+15)
+#define YPOS_DIRECT     (WY1+5)
 #define XGAP_DIRECT     10
-#define YPOS_NOTE       (WY0+25)
+#define YPOS_NOTE       (WY1+30)
 #define LOW_DIRECT_STR  "bas"
 #define HIGH_DIRECT_STR "haut"
 
-#define YPOS_SIGN       (WY0+60)
+#define YPOS_SIGN       (WY1+30+30)
 #define LOW_SIGN_STR    "<<<<"
 #define HIGH_SIGN_STR   ">>>>"
 #define NO_SIGN_STR     "    "
@@ -177,6 +177,7 @@ void display_bckgnd()
     high_sign_shown = false;
     last_x0 = 0;
     last_x1 = 0;
+    last_note_strlen = len;
     last_note = N_NO_SIGNAL;
 }
 
@@ -310,7 +311,7 @@ void show_note(int note)
         dx1 = dx0 + len*Font24.Width;
 
         Paint_DrawRectangle(x0, y0, x1, y1, BLACK, DOT_PIXEL_1X1, DRAW_FILL_FULL);  // erase
-        Paint_DrawString_EN(dx0, y0, string_label[note], &Font24, BLACK, WHITE);  // draw
+        Paint_DrawString_EN(dx0, y0, msg, &Font24, BLACK, WHITE);  // draw
         LCD_1IN14_DisplayWindows((x0 < dx0 ? x0 : dx0), YPOS_NOTE, (x1 > dx1 ? x1 : dx1), y1, image);  // send do display
 
         last_note_strlen = len;
@@ -438,9 +439,8 @@ int main(void)
             else if (i > 400.0) status = N_HIGH_FREQ;
 
             start = time_us_32();
-            printf("%lf\n", i);
             display_tuner(status, i);
-            // printf("%lu\n", time_us_32() - start);
+            printf("%8lu\n", time_us_32() - start);
             DEV_Delay_ms(DELAY_MS);
 
         }
