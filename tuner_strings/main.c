@@ -126,15 +126,18 @@ int find_closest_string(int instrument, double cents)
     int string;
     double min_diff = DBL_MAX;  // set to very large value
     double *string_cents;
+    int n_strings;
 
     if (instrument == BASS) {
+        n_strings = NUM_STRING_GUITAR;
         string_cents = bass_string_cents;
     }
     else {
+        n_strings = NUM_STRING_BASS;
         string_cents = guitar_string_cents;
     }
 
-    for (i = 0; i < 6; i++) {
+    for (i = 0; i < n_strings; i++) {
         diff = fabs(cents - string_cents[i]);
         if (diff < min_diff) {
             min_diff = diff;
