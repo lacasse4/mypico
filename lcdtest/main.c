@@ -5,15 +5,8 @@
 #include <math.h>
 #include <float.h>
 #include <string.h>
-// #include "EPD_Test.h"
 #include "LCD_1in14.h"
 #include "GUI_Paint.h"
-#include "ImageData.h"
-
-/* set address */
-// bool reserved_addr(uint8_t addr) {
-// return (addr & 0x78) == 0 || (addr & 0x78) == 0x78;
-// }
 
 #define IMAGE_SIZE (LCD_1IN14_HEIGHT*LCD_1IN14_WIDTH*2)
 UWORD image[IMAGE_SIZE];
@@ -115,21 +108,20 @@ double get_cents(double frequency)
 #define T_HALF_LENGTH   (TUNER_LENGTH/2)
 #define CENTS_SHOWN     200.0
 #define DISP_FACTOR     ((TUNER_LENGTH-1)/CENTS_SHOWN)
-#define WX0 (MID_POS-T_HALF_LENGTH)
-#define WX1 (MID_POS+T_HALF_LENGTH)
-#define WY0 10
-#define WY1 (WX0+TUNER_HEIGHT)
-#define TIC_LEN     5
-#define CENTS_LIMIT 10.0
+#define WX0             (MID_POS-T_HALF_LENGTH)
+#define WX1             (MID_POS+T_HALF_LENGTH)
+#define WY0             40
+#define WY1             (WX0+TUNER_HEIGHT)
+#define TIC_LEN         5
+#define CENTS_LIMIT     10.0
 
-#define YPOS_DIRECT     65
+#define YPOS_DIRECT     (WY0+15)
 #define XGAP_DIRECT     10
-#define YPOS_NOTE       80
+#define YPOS_NOTE       (WY0+25)
 #define LOW_DIRECT_STR  "bas"
 #define HIGH_DIRECT_STR "haut"
-#define NO_SIGNAL_STR   "SIGNAL ABSENT"
 
-#define YPOS_SIGN       110
+#define YPOS_SIGN       (WY0+60)
 #define LOW_SIGN_STR    "<<<<"
 #define HIGH_SIGN_STR   ">>>>"
 #define NO_SIGN_STR     "    "
@@ -137,7 +129,21 @@ double get_cents(double frequency)
 #define HIGH_SIGN       1
 #define LOW_SIGN        2
 
-bool full_redraw = true;
+#define N_FREQ_OK       0
+#define N_NO_SIGNAL     -1
+#define N_DETECTING     -2
+#define N_LOW_FREQ      -3
+#define N_HIGH_FREQ     -4
+
+#define NO_SIGNAL_STR   "SIGNAL ABSENT"
+#define DETECTING_STR   "DETECTION..."
+#define LOW_FREQ_STR    "TROP BAS"
+#define HIGH_FREQ_STR   "TROP AIGU"
+
+// #define NO_SIGNAL       false
+// #define SIGNAL_DETECTED true
+
+// bool full_redraw = true;
 bool tuner_shown = false;
 bool low_sign_shown = false;
 bool high_sign_shown = false;
@@ -155,25 +161,31 @@ void draw_string_window(uint16_t x0, uint16_t y0, const char *s, sFONT *f, uint1
 
 void display_bckgnd()
 {
-    if (full_redraw) {
-        Paint_Clear(BLACK);
-        Paint_DrawRectangle(WX0, WY0, WX1, WY1, GRAY, DOT_PIXEL_1X1, DRAW_FILL_EMPTY);
-        Paint_DrawLine(MID_POS, WY0-TIC_LEN, MID_POS, WY0, WHITE, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
-        Paint_DrawLine(MID_POS, WY1, MID_POS, WY1+TIC_LEN, WHITE, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
-        Paint_DrawString_EN(XGAP_DIRECT, YPOS_DIRECT, LOW_DIRECT_STR, &Font12, BLACK, WHITE);
-        Paint_DrawString_EN(LCD_1IN14_HEIGHT - XGAP_DIRECT - (Font12.Width*strlen(HIGH_DIRECT_STR)) - XGAP_DIRECT, YPOS_DIRECT, HIGH_DIRECT_STR, &Font12, BLACK, WHITE);
-        Paint_DrawString_EN(MID_POS-(Font24.Width*strlen(NO_SIGNAL_STR)/2), YPOS_NOTE, NO_SIGNAL_STR, &Font24, BLACK, WHITE);
+    size_t len = strlen(NO_SIGNAL_STR);
+    Paint_Clear(BLACK);
+    Paint_DrawRectangle(WX0, WY0, WX1, WY1, GRAY, DOT_PIXEL_1X1, DRAW_FILL_EMPTY);
+    Paint_DrawLine(MID_POS, WY0-TIC_LEN, MID_POS, WY0, WHITE, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
+    Paint_DrawLine(MID_POS, WY1, MID_POS, WY1+TIC_LEN, WHITE, DOT_PIXEL_1X1, LINE_STYLE_SOLID);
+    Paint_DrawString_EN(XGAP_DIRECT, YPOS_DIRECT, LOW_DIRECT_STR, &Font12, BLACK, WHITE);
+    Paint_DrawString_EN(LCD_1IN14_HEIGHT - XGAP_DIRECT - (Font12.Width*strlen(HIGH_DIRECT_STR)), YPOS_DIRECT, HIGH_DIRECT_STR, &Font12, BLACK, WHITE);
+    Paint_DrawString_EN(MID_POS-(Font24.Width*len/2), YPOS_NOTE, NO_SIGNAL_STR, &Font24, BLACK, WHITE);
 
-        LCD_1IN14_Display(image);
+    LCD_1IN14_Display(image);
 
-        full_redraw = false;
+    tuner_shown = false;
+    low_sign_shown = false;
+    high_sign_shown = false;
+    last_x0 = 0;
+    last_x1 = 0;
+    last_note = N_NO_SIGNAL;
+}
+
+void erase_tuner()
+{
+    if (tuner_shown) {
+        Paint_DrawRectangle(WX0+1, WY0+1, WX1-1, WY1-1, BLACK, DOT_PIXEL_1X1, DRAW_FILL_FULL);
+        LCD_1IN14_DisplayWindows(WX0+1, WY0+1, WX1-1, WY1-1, image);
         tuner_shown = false;
-        low_sign_shown = false;
-        high_sign_shown = false;
-        last_note_strlen = strlen(NO_SIGNAL_STR);
-        last_x0 = 0;
-        last_x1 = 0;
-        last_note = -1;
     }
 }
 
@@ -189,9 +201,26 @@ void show_tuner(uint16_t x0, uint16_t x1, uint16_t color)
     }
 }
 
+void erase_sign() 
+{
+    uint16_t x;
+
+    if (low_sign_shown) {
+        x = MID_POS-(T_HALF_LENGTH/2)-(Font24.Width*strlen(NO_SIGN_STR)/2);
+        draw_string_window(x, YPOS_SIGN, NO_SIGN_STR, &Font24, BLACK, BLACK);
+        low_sign_shown = false;
+    }
+    if (high_sign_shown) {
+        x = MID_POS+(T_HALF_LENGTH/2)-(Font24.Width*strlen(NO_SIGN_STR)/2);
+        draw_string_window(x, YPOS_SIGN, NO_SIGN_STR, &Font24, BLACK, BLACK);
+        high_sign_shown = false;
+    }
+}
+
 void show_sign(int sign)
 {
     uint16_t x;
+
     if (sign == LOW_SIGN) {
         if (high_sign_shown) {
             // erase high sign
@@ -235,27 +264,61 @@ void show_sign(int sign)
     }
 }
 
+void erase_note() 
+{
+    uint16_t x0, x1, y0, y1;
+    size_t len;
+
+    if (last_note != N_NO_SIGNAL) {
+        x0 = MID_POS - (Font24.Width*last_note_strlen/2);
+        x1 = x0 + last_note_strlen*Font24.Width;
+        y0 = YPOS_NOTE;
+        y1 = YPOS_NOTE + Font24.Height;
+        len = strlen(NO_SIGNAL_STR);
+
+        Paint_DrawRectangle(x0, y0, x1, y1, BLACK, DOT_PIXEL_1X1, DRAW_FILL_FULL);  // erase
+        Paint_DrawString_EN(MID_POS-(Font24.Width*len/2), YPOS_NOTE, NO_SIGNAL_STR, &Font24, BLACK, WHITE);
+        LCD_1IN14_DisplayWindows(x0, YPOS_NOTE, x1, y1, image);  // send do display
+
+        last_note_strlen = len;
+        last_note = N_NO_SIGNAL;
+    }
+}
+
 void show_note(int note) 
 {
-    if (last_note != note) {
-        uint16_t x0 = MID_POS - (Font24.Width*last_note_strlen/2);
-        uint16_t x1 = x0 + last_note_strlen*Font24.Width;
-        uint16_t y0 = YPOS_NOTE;
-        uint16_t y1 = YPOS_NOTE + Font24.Height;
+    uint16_t x0, x1, y0, y1, dx0, dx1;
+    size_t len;
+    char *msg;
 
-        uint16_t dx0 = MID_POS-(Font24.Width*strlen(string_label[note])/2);
-        uint16_t dx1 = dx0 + strlen(string_label[note])*Font24.Width;
+    if (last_note != note) {
+        x0 = MID_POS - (Font24.Width*last_note_strlen/2);
+        x1 = x0 + last_note_strlen*Font24.Width;
+        y0 = YPOS_NOTE;
+        y1 = YPOS_NOTE + Font24.Height;
+
+        switch (note) {
+            case N_NO_SIGNAL: msg = NO_SIGNAL_STR;      break;
+            case N_DETECTING: msg = DETECTING_STR;      break;
+            case N_LOW_FREQ:  msg = LOW_FREQ_STR;       break;
+            case N_HIGH_FREQ: msg = HIGH_FREQ_STR;      break;
+            default:          msg = string_label[note]; break;
+        }
+
+        len = strlen(msg);
+        dx0 = MID_POS-(Font24.Width*len/2);
+        dx1 = dx0 + len*Font24.Width;
 
         Paint_DrawRectangle(x0, y0, x1, y1, BLACK, DOT_PIXEL_1X1, DRAW_FILL_FULL);  // erase
         Paint_DrawString_EN(dx0, y0, string_label[note], &Font24, BLACK, WHITE);  // draw
         LCD_1IN14_DisplayWindows((x0 < dx0 ? x0 : dx0), YPOS_NOTE, (x1 > dx1 ? x1 : dx1), y1, image);  // send do display
 
-        last_note_strlen = strlen(string_label[note]);
+        last_note_strlen = len;
         last_note = note;
     }
 }
 
-void display_tuner(double frequency)
+void display_tuner(int status, double frequency)
 {    
     uint16_t x0, x1;
     uint16_t color;
@@ -266,13 +329,33 @@ void display_tuner(double frequency)
     int     string;
     double  cents;
     double  cents_delta; 
-    static double last_frequency = 0.0;
 
-    if (frequency <= 0.0) {
-        if (last_frequency > 0.0) full_redraw = true;
-        display_bckgnd();
-    } 
-    else {
+    switch (status) {
+    case N_NO_SIGNAL:
+        erase_tuner();
+        erase_sign();
+        show_note(N_NO_SIGNAL);
+        break;
+
+    case N_DETECTING:
+        erase_tuner();
+        erase_sign();
+        show_note(N_DETECTING);
+        break;
+
+    case N_LOW_FREQ:
+        erase_tuner();
+        show_sign(LOW_SIGN);
+        show_note(N_LOW_FREQ);
+        break;
+
+    case N_HIGH_FREQ:
+        erase_tuner();
+        show_sign(HIGH_SIGN);
+        show_note(N_HIGH_FREQ);
+        break;
+
+    case N_FREQ_OK:
         cents = get_cents(frequency);
         string = find_closest_string(cents);
         cents_delta = cents - string_cents[string]; 
@@ -325,15 +408,16 @@ void display_tuner(double frequency)
             show_sign(NO_SIGN);
         }
         show_note(string);
+        break;
     }
-    last_frequency = frequency;
 }
 
-#define DELAY_MS 5
+#define DELAY_MS 50
 
 int main(void)
 {
     uint32_t start;
+    int status;
 
     stdio_init_all();
     sleep_ms(1000);
@@ -347,10 +431,17 @@ int main(void)
 
         for (double i = -10.0; i < 410.0; i=i+0.5) {
 
+            status = 0;
+            if (i < 0.0) status = N_NO_SIGNAL;
+            else if (i < 25.0) status = N_DETECTING; 
+            else if (i < 60.0) status = N_LOW_FREQ;
+            else if (i > 400.0) status = N_HIGH_FREQ;
+
             start = time_us_32();
-            display_tuner(i);
-            printf("%lu\n", time_us_32() - start);
-            // DEV_Delay_ms(DELAY_MS);
+            printf("%lf\n", i);
+            display_tuner(status, i);
+            // printf("%lu\n", time_us_32() - start);
+            DEV_Delay_ms(DELAY_MS);
 
         }
     }
