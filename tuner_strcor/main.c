@@ -321,8 +321,8 @@ void core1_entry() {
 
 // Program entry point
 int main() {
-    double frequency;
-    int status;
+    // double frequency;
+    // int status;
     tuner_t tuner;
     uint32_t start_time = 0;
     uint32_t elapsed_time, now;
@@ -382,41 +382,6 @@ int main() {
         default:
             printf("should never occur\n");
             break;
-        }
-
-        if (fdetect_is_timer_elapsed()) {
-            if (fdetect_no_falling_edge()) {
-                print_invalid(NO_SIGNAL);   
-            }
-            else {
-                print_invalid(TOO_LOW);
-            }
-            fdetect_reset_search();
-        }
-        else if (fdetect_is_read_ok()) {
-
-            status = fdetect_get_frequency(&frequency);
-            elapsed_time =  time_us_32() - start_time;
-
-            toggle_led();
-
-            if (status) {
-                if (frequency > MAX_FREQ) {
-                    print_invalid(TOO_HIGH);
-                }
-                else {
-                    // show_frequency(frequency);
-                    printf("  %7.3lf", frequency);
-                    printf("  %lu   ", elapsed_time);
-                    printf("        \r");
-                }
-            }
-            else {
-                print_invalid(DETECTING);
-            }
-
-            
-            start_time = time_us_32();
         }
     }
 

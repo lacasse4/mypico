@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "dev_config.h": "c",
+        "spi.h": "c"
+    }
+}
