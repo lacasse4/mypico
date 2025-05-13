@@ -1,21 +1,21 @@
 /**
- * @name tuner_strcor
+ * @name tuner_lcd
  * @details
  * Simple bass/guitar tuner using an zero crossing algorithm
  *  - runs on a Raspberry pi pico 1 built w/ C/C++ SDK 1.5.1
  *  - detects fallings edges on GPIO 14 (INPUT_PIN) for frequency estimation 
  *  - ouptuts to console 
  * 
- * This is an improvement over tuner_strings program:
- * the console display is performed asynchonously on core0 while
- * frequency detection is performed on core1.
- * data is interchanged between cores using a mutex mechanism.
+ * This is an improvement over tuner_strcor program:
+ * the console display has been replaced by a WaveShare 1.14 lcd 
+ * (https://www.waveshare.com/wiki/Pico-LCD-1.14)
+ * This a merge of tuner_core and lcdtest projects
  * 
  * @note  It is assumed that the input signal is analogicaly filtered 
  * with an 8 poles low pass filter that is set with a 1 KHz cut off frequency. 
  *
  * @author Vincent Lacasse
- * @date   2025-05-04
+ * @date   2025-05-12
  */
 
 #include <stdio.h>
@@ -193,11 +193,11 @@ int find_closest_string(double cents)
 
     if (instrument == GUITAR) {
         n_strings = NUM_STRING_GUITAR;
-        string_cents = bass_string_cents;
+        string_cents = guitar_string_cents;
     }
     else {
         n_strings = NUM_STRING_BASS;
-        string_cents = guitar_string_cents;
+        string_cents = bass_string_cents;
     }
 
     for (i = 0; i < n_strings; i++) {
@@ -777,7 +777,7 @@ int main() {
             display_tuner(tuner.status, tuner.frequency);
 
             printf("  %7.3lf", tuner.frequency);
-            printf("  %lu   ", elapsed_time);
+            printf("  %8lu   ", elapsed_time);
             printf("        \r");
             break;
 
@@ -793,6 +793,7 @@ int main() {
 
         case N_HIGH_FREQ:
             display_tuner(tuner.status, tuner.frequency);
+            printf("  %7.3lf", tuner.frequency);
             print_invalid(MSG_TOO_HIGH);
             break;
 

@@ -100,7 +100,7 @@ void fedge_init(uint _input_pin, int _length)
     gpio_set_input_enabled (input_pin, true);
     gpio_pull_up (input_pin);
     gpio_set_irq_enabled_with_callback(input_pin, GPIO_IRQ_EDGE_FALL, true, &fedge_handler);
-    gpio_set_input_hysteresis_enabled (input_pin, true);
+    // gpio_set_input_hysteresis_enabled (input_pin, true);
 }
 
 // Arm edge detector 
