@@ -30,7 +30,7 @@
 #include "DEV_Config.h"
 #include "Debug.h"
 #include <stdint.h>
-#include <stdlib.h>
+// #include <stdlib.h>
 #include <string.h> //memset()
 #include <math.h>
 
@@ -193,7 +193,7 @@ void Paint_SetPixel(UWORD Xpoint, UWORD Ypoint, UWORD Color)
     if(Paint.Scale == 2){
         UDOUBLE Addr = X / 8 + Y * Paint.WidthByte;
         UBYTE Rdata = Paint.Image[Addr];
-        if(Color&0xff == BLACK)
+        if((Color&0xff) == BLACK)
             Paint.Image[Addr] = Rdata & ~(0x80 >> (X % 8));
         else
             Paint.Image[Addr] = Rdata | (0x80 >> (X % 8));
@@ -284,8 +284,8 @@ void Paint_DrawPoint(UWORD Xpoint, UWORD Ypoint, UWORD Color,
 {
     if (Xpoint > Paint.Width || Ypoint > Paint.Height) {
         Debug("Paint_DrawPoint Input exceeds the normal display range\r\n");
-        printf("Xpoint = %d , Paint.Width = %d  \r\n ",Xpoint,Paint.Width);
-        printf("Ypoint = %d , Paint.Height = %d  \r\n ",Ypoint,Paint.Height);
+        // printf("Xpoint = %d , Paint.Width = %d  \r\n ",Xpoint,Paint.Width);
+        // printf("Ypoint = %d , Paint.Height = %d  \r\n ",Ypoint,Paint.Height);
         return;
     }
 

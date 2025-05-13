@@ -53,7 +53,10 @@
 // MAX_FREQ_PCT is that maximum percentage allowed from the previous measurment.
 #define MAX_FREQ_PCT    0.05
 
-// *************
+/*
+ * Data structure and functions to pass tuner information from 
+ * core1 (frequency measurement) to core2 (display management)
+ */
 
 typedef struct {
     double frequency;
@@ -82,12 +85,11 @@ void get_tuner_data(tuner_t *tuner)
     mutex_exit(&mutex);    
 }
 
-// *************
-
-
 
 /*
- * Basse guitar string frequencies in Hz
+ * Instrument specific data and functions
+ *
+ * Bass guitar string frequencies in Hz
  * B0   30.87
  * E1   41.21
  * A1   55.00
@@ -103,7 +105,6 @@ void get_tuner_data(tuner_t *tuner)
  * E4   329.63
  */
 
-// frequency detection parameters
 #define MAX_FREQ        410         // in Hz based on guitar high string
 #define MIN_FREQ        25          // in Hz based on bass guitar low string
 #define TIMER_FREQ      1000000     // in Hz
@@ -160,7 +161,7 @@ char *bass_string_label[NUM_STRING_BASS] = {
 static int instrument = GUITAR;
 void set_instrument(int _instrument)    { instrument = _instrument; }
 int  get_instrument()                   { return instrument; }
-char*  get_string_label(int string) 
+char* get_string_label(int string) 
 { 
     if (instrument == GUITAR) {
         return guitar_string_label[string];
@@ -217,50 +218,81 @@ double get_cents(double frequency)
 }
 
 /*
-#define DISPLAY_LEN     101
-#define BLANK           "                                                                                                    "
-#define MID_POS         (DISPLAY_LEN/2)
-#define DISP_FACTOR     ((DISPLAY_LEN-1)/500.0)
+ * Waveshare 1.14 LCD functions
+ *
+ * These functions were designed to minimized data transmission
+ * over the spi link which proved to be lenghty using the library 
+ * provided by Waveshare.
+ * 
+ * The display is divided in 4 regions: tuner, sign, note and bacground.
+ * The background is the entire screen, and should be drawn once at the beginning.
+ * The tuner region is a bargraph showing the frequency relative to a tuning note.
+ * The sign region shows low or high signs if the frequency exceeds the bargraph capability.
+ * the note region shows the tuning note or some messages related to the tuner status.
+ * 
+ * Note: LCD_1IN14_Clear() should NOT be used since it stalls the processor.  
+ * I suspect its automatic variables are to big.
+ */
 
-void show_frequency(double frequency)
-{
-    int i;
-    char    s[1000];
-    char    t[1000];
-    double  cents = get_cents(frequency);
-    int     string = find_closest_string(GUITAR, cents);
-    int     rel_to_mid = round((cents - guitar_string_cents[string])*DISP_FACTOR);
+// definitions to setup the tuner display
 
-    strcpy(s, BLANK);
-    if (rel_to_mid < 0) {
-        if (MID_POS + rel_to_mid < 0) return;
-        for (i = MID_POS+rel_to_mid; i < MID_POS; i++) {
-            s[i] = '*';
-        }
-    }
-    else if (rel_to_mid > 0) {
-        if (MID_POS + rel_to_mid > DISPLAY_LEN) return;
-        for (i = MID_POS+1; i <= MID_POS+rel_to_mid; i++) {
-            s[i] = '*';
-        }
-    }
-    else {
-        s[MID_POS] = '*';
-    }
+//  tuner position
+#define MID_POS         (LCD_1IN14_HEIGHT/2)
+#define TUNER_LENGTH    221
+#define TUNER_HEIGHT    10
+#define T_HALF_LENGTH   (TUNER_LENGTH/2)
+#define CENTS_SHOWN     200.0
+#define DISP_FACTOR     ((TUNER_LENGTH-1)/CENTS_SHOWN)
+#define WX0             (MID_POS-T_HALF_LENGTH)
+#define WX1             (MID_POS+T_HALF_LENGTH)
+#define WY0             20
+#define WY1             (WY0+TUNER_HEIGHT)
+#define TIC_LEN         5
+#define CENTS_LIMIT     20.0
 
-    s[MID_POS] = '|';
-    s[DISPLAY_LEN+1] = '\0';
-    strcpy(t, guitar_string_label[string]);
-    strcat(t, s);
-    printf("%s", t);
-}
-*/
+// small direction labels
+#define YPOS_DIRECT     (WY1+5)
+#define XGAP_DIRECT     10
+#define YPOS_NOTE       (WY1+30)
+#define LOW_DIRECT_STR  "bas"
+#define HIGH_DIRECT_STR "haut"
 
-// LCD
+// low and hign signs
+#define YPOS_SIGN       (WY1+30+30)
+#define LOW_SIGN_STR    "<<<<"
+#define HIGH_SIGN_STR   ">>>>"
+#define NO_SIGN_STR     "    "
+#define NO_SIGN         0
+#define HIGH_SIGN       1
+#define LOW_SIGN        2
+
+// note message labels
+#define NO_SIGNAL_STR   "SIGNAL ABSENT"
+#define DETECTING_STR   "DETECTION..."
+#define LOW_FREQ_STR    "TROP BAS"
+#define HIGH_FREQ_STR   "TROP AIGU"
+
+// frequency status definitions
+#define N_FREQ_OK        0
+#define N_NO_SIGNAL     -1
+#define N_DETECTING     -2
+#define N_LOW_FREQ      -3
+#define N_HIGH_FREQ     -4
+
 
 #define IMAGE_SIZE (LCD_1IN14_HEIGHT*LCD_1IN14_WIDTH*2)
 UWORD image[IMAGE_SIZE];
 
+bool tuner_shown = false;
+bool low_sign_shown = false;
+bool high_sign_shown = false;
+
+uint16_t last_x0 = 0;
+uint16_t last_x1 = 0;
+int last_note = -1;
+int last_note_strlen;
+
+// Waveshare LCD initialisation.
 void LCD_init() 
 {
     DEV_Delay_ms(100);
@@ -289,91 +321,15 @@ void LCD_init()
     LCD_1IN14_Display(image);
 }
 
-
-#define MID_POS         (LCD_1IN14_HEIGHT/2)
-#define TUNER_LENGTH    221
-#define TUNER_HEIGHT    10
-#define T_HALF_LENGTH   (TUNER_LENGTH/2)
-#define CENTS_SHOWN     200.0
-#define DISP_FACTOR     ((TUNER_LENGTH-1)/CENTS_SHOWN)
-#define WX0             (MID_POS-T_HALF_LENGTH)
-#define WX1             (MID_POS+T_HALF_LENGTH)
-#define WY0             20
-#define WY1             (WY0+TUNER_HEIGHT)
-#define TIC_LEN         5
-#define CENTS_LIMIT     20.0
-
-#define YPOS_DIRECT     (WY1+5)
-#define XGAP_DIRECT     10
-#define YPOS_NOTE       (WY1+30)
-#define LOW_DIRECT_STR  "bas"
-#define HIGH_DIRECT_STR "haut"
-
-#define YPOS_SIGN       (WY1+30+30)
-#define LOW_SIGN_STR    "<<<<"
-#define HIGH_SIGN_STR   ">>>>"
-#define NO_SIGN_STR     "    "
-#define NO_SIGN         0
-#define HIGH_SIGN       1
-#define LOW_SIGN        2
-
-#define MID_POS         (LCD_1IN14_HEIGHT/2)
-#define TUNER_LENGTH    221
-#define TUNER_HEIGHT    10
-#define T_HALF_LENGTH   (TUNER_LENGTH/2)
-#define CENTS_SHOWN     200.0
-#define DISP_FACTOR     ((TUNER_LENGTH-1)/CENTS_SHOWN)
-#define WX0             (MID_POS-T_HALF_LENGTH)
-#define WX1             (MID_POS+T_HALF_LENGTH)
-#define WY0             20
-#define WY1             (WY0+TUNER_HEIGHT)
-#define TIC_LEN         5
-#define CENTS_LIMIT     20.0
-
-#define YPOS_DIRECT     (WY1+5)
-#define XGAP_DIRECT     10
-#define YPOS_NOTE       (WY1+30)
-#define LOW_DIRECT_STR  "bas"
-#define HIGH_DIRECT_STR "haut"
-
-#define YPOS_SIGN       (WY1+30+30)
-#define LOW_SIGN_STR    "<<<<"
-#define HIGH_SIGN_STR   ">>>>"
-#define NO_SIGN_STR     "    "
-#define NO_SIGN         0
-#define HIGH_SIGN       1
-#define LOW_SIGN        2
-
-#define N_FREQ_OK       0
-#define N_NO_SIGNAL     -1
-#define N_DETECTING     -2
-#define N_LOW_FREQ      -3
-#define N_HIGH_FREQ     -4
-
-#define NO_SIGNAL_STR   "SIGNAL ABSENT"
-#define DETECTING_STR   "DETECTION..."
-#define LOW_FREQ_STR    "TROP BAS"
-#define HIGH_FREQ_STR   "TROP AIGU"
-
-// #define NO_SIGNAL       false
-// #define SIGNAL_DETECTED true
-
-// bool full_redraw = true;
-bool tuner_shown = false;
-bool low_sign_shown = false;
-bool high_sign_shown = false;
-
-uint16_t last_x0 = 0;
-uint16_t last_x1 = 0;
-int last_note = -1;
-int last_note_strlen;
-
+// draw a string immediate at position
+// note: fore and back are reversed
 void draw_string_window(uint16_t x0, uint16_t y0, const char *s, sFONT *f, uint16_t fore, uint16_t back)
 {
     Paint_DrawString_EN(x0, y0, s, f, fore, back);
     LCD_1IN14_DisplayWindows(x0, y0, x0 + f->Width*strlen(s), y0 + f->Height, image);
 }
 
+// draw the full display background
 void display_bckgnd()
 {
     size_t len = strlen(NO_SIGNAL_STR);
@@ -396,6 +352,7 @@ void display_bckgnd()
     last_note = N_NO_SIGNAL;
 }
 
+// erase the tuner region, if necessary
 void erase_tuner()
 {
     if (tuner_shown) {
@@ -405,6 +362,7 @@ void erase_tuner()
     }
 }
 
+// draw the tuner region, if necessary
 void show_tuner(uint16_t x0, uint16_t x1, uint16_t color)
 {
     if (!tuner_shown || x0 != last_x0 || x1 != last_x1) {
@@ -417,6 +375,7 @@ void show_tuner(uint16_t x0, uint16_t x1, uint16_t color)
     }
 }
 
+// erase the low and high signs, if necessary
 void erase_sign() 
 {
     uint16_t x;
@@ -433,6 +392,7 @@ void erase_sign()
     }
 }
 
+// draw the low or the high sign, if necessary
 void show_sign(int sign)
 {
     uint16_t x;
@@ -480,6 +440,7 @@ void show_sign(int sign)
     }
 }
 
+// erase the note region, if necessary
 void erase_note() 
 {
     uint16_t x0, x1, y0, y1;
@@ -501,6 +462,7 @@ void erase_note()
     }
 }
 
+// draw the note, if necessary
 void show_note(int note) 
 {
     uint16_t x0, x1, y0, y1, dx0, dx1;
@@ -534,6 +496,7 @@ void show_note(int note)
     }
 }
 
+// display the tuner region, if necessary
 void display_tuner(int status, double frequency)
 {    
     uint16_t x0, x1;
@@ -628,18 +591,9 @@ void display_tuner(int status, double frequency)
     }
 }
 
-
-#define N_FREQ_OK       0
-#define N_NO_SIGNAL     -1
-#define N_DETECTING     -2
-#define N_LOW_FREQ      -3
-#define N_HIGH_FREQ     -4
-
-#define NO_SIGNAL_STR   "SIGNAL ABSENT"
-#define DETECTING_STR   "DETECTION..."
-#define LOW_FREQ_STR    "TROP BAS"
-#define HIGH_FREQ_STR   "TROP AIGU"
-
+/*
+ * Small utilities to show an "alive" signal and for debugging
+ */
 
 // Inititialize Pico on board LED
 void init_led() 
@@ -657,20 +611,6 @@ void toggle_led()
     led_on = !led_on;
 }
 
-
-#define MSG_TOO_LOW     "  TOO LOW  "
-#define MSG_TOO_HIGH    "  TOO HIGH "
-#define MSG_NO_SIGNAL   " NO SIGNAL "
-#define MSG_DETECTING   " DETECTING "
-
-
-#define N_FREQ_OK        0
-#define N_NO_SIGNAL     -1
-#define N_DETECTING     -2
-#define N_LOW_FREQ      -3
-#define N_HIGH_FREQ     -4
-
-
 void print_invalid(char *s)
 {
     static char c[4] = {'|', '/', '-', '\\'};
@@ -681,7 +621,13 @@ void print_invalid(char *s)
 }
 
 
-// Program entry point
+/* 
+ * Entry point for core1 processing
+ * 
+ * core1 listens to INPUT_PIN GPIO and measures the signal frequency.
+ * It uses a GPIO interrupt and a timer interrupt.
+ */ 
+
 void core1_entry() {
     tuner_t tuner;
     double frequency;
@@ -734,9 +680,26 @@ void core1_entry() {
     }
 }
 
+/*
+ * Entry point for core0 processing
+ *
+ * core0 initiates and launches core1. It is also responsible for displaying the tuner.
+ */
 
-// Program entry point
-int main() {
+#define MSG_TOO_LOW     "  TOO LOW  "
+#define MSG_TOO_HIGH    "  TOO HIGH "
+#define MSG_NO_SIGNAL   " NO SIGNAL "
+#define MSG_DETECTING   " DETECTING "
+
+// frequency status definitions
+// #define N_FREQ_OK        0
+// #define N_NO_SIGNAL     -1
+// #define N_DETECTING     -2
+// #define N_LOW_FREQ      -3
+// #define N_HIGH_FREQ     -4
+
+
+ int main() {
     // double frequency;
     // int status;
     tuner_t tuner;
@@ -754,31 +717,41 @@ int main() {
     sleep_ms(100);  // it seems that the internal timer takes some time to startup.
     fdetect_init(INPUT_PIN, LENGTH, SLEEP_TIME_MS, ALPHA, MAX_FREQ_PCT);
 
+    // setup mutex for data interchanges between core1 and core0
     mutex_init(&mutex);
+
+    // launch frequency measurment
     multicore_launch_core1(core1_entry);
 
-    LCD_init();
-    display_bckgnd();
+    // Initialise the LCD and display the tuner background.
+    // LCD_init();
+    // display_bckgnd();
 
     while (true) {
 
         sleep_ms(5);
         get_tuner_data(&tuner);
 
+        // check that the timestamp has changed in order to 
+        // modify the display only if data has changed.
         if (tuner.timestamp == timestamp) continue;
         timestamp = tuner.timestamp;
 
+        // to be removed
         now = time_us_32();
         elapsed_time =  now - start_time;
         start_time = now;
+
+        printf("  f: %7.3lf  s: %d\n", tuner.frequency, tuner.status);
+        continue;
 
         switch (tuner.status) {
         case N_FREQ_OK:
             display_tuner(tuner.status, tuner.frequency);
 
-            printf("  %7.3lf", tuner.frequency);
-            printf("  %8lu   ", elapsed_time);
-            printf("        \r");
+            // printf("  %7.3lf", tuner.frequency);
+            // printf("  %8lu   ", elapsed_time);
+            // printf("        \r");
             break;
 
         case N_NO_SIGNAL:

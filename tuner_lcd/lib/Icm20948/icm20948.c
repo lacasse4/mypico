@@ -52,7 +52,7 @@ bool icm20948Check(void);
 
 char I2C_ReadOneByte(char reg)
 {
-	char buf;
+	// har buf;
 	return DEV_I2C_ReadByte(I2C_ADD_ICM20948,reg);
 }
 

@@ -90,7 +90,7 @@ int Read_Infrared_Value(void)
         }
 
         if(data[0]+data[1] == 0xFF && data[2]+data[3]==0xFF){	//check	
-            printf("Get the key: 0x%02x\n",data[2]);
+            // printf("Get the key: 0x%02x\n",data[2]);
             return data[2];
         }else {
             return -1;//Get data check error

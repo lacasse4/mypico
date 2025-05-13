@@ -168,20 +168,18 @@ parameter:
 Info:
 ******************************************************************************/
 UBYTE DEV_Module_Init(void)
-{
-    stdio_init_all();
-    
+{    
     //GPIO PIN
     EPD_RST_PIN     = 12;
     EPD_DC_PIN      = 8;
-    EPD_BL_PIN    = 13;
+    EPD_BL_PIN      = 13;
     
     EPD_CS_PIN      = 9;
     EPD_CLK_PIN     = 10;
     EPD_MOSI_PIN    = 11;
     
-    EPD_SCL_PIN    = 7;
-    EPD_SDA_PIN    = 6;
+    EPD_SCL_PIN     = 7;
+    EPD_SDA_PIN     = 6;
     
     // SPI Config
     spi_init(SPI_PORT, 10000 * 1000);
@@ -208,7 +206,6 @@ UBYTE DEV_Module_Init(void)
     gpio_pull_up(EPD_SDA_PIN);
     gpio_pull_up(EPD_SCL_PIN);
     
-    printf("DEV_Module_Init OK \r\n");
     return 0;
 }
 
@@ -219,9 +216,7 @@ parameter:
 		Value 	: 0 ~ 100
 ******************************************************************************/
 void DEV_SET_PWM(uint8_t Value){
-    if(Value<0 || Value >100){
-        printf("DEV_SET_PWM Error \r\n");
-    }else {
+    if(Value>=0 && Value <=100) {
         pwm_set_chan_level(slice_num, PWM_CHAN_B, Value);
     }
 }
