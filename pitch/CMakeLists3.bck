@@ -1,0 +1,8 @@
+add_library(pitch 
+  _pitch_cep.c
+  _pitch_hps.c
+  _pitch_lhs.c
+  _pitch_ncf.c
+  _pitch_pef.c
+  _pitch_yin.c 
+  )
