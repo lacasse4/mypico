@@ -24,41 +24,34 @@ add_compile_options(
   -Wno-unused-function # we have some for the docs that aren't called
   )
 
-  # PROJECT DEFINITION
+# PROJECT DEFINITION
 
 project(main C CXX ASM)
 
-# Add a compilation subdirectory
-add_subdirectory(lib/Config)
-add_subdirectory(lib/Infrared)
-add_subdirectory(lib/Icm20948)
-add_subdirectory(lib/LCD)
-add_subdirectory(lib/Fonts)
-add_subdirectory(lib/GUI)
+# Add executables
+add_executable(main 
+  main.c
+  ../pitch/_pitch_yin.c
+  ../pitch/dsp/fft_algorithm.c
+  ../pitch/dsp/flux_window.c
+  ../pitch/util/flux_util.c
+  ../pitch/util/flux_wave.c
+  ../pitch/vector/flux_complex.c
+  ../pitch/vector/flux_vector.c
+  ../pitch/vector/flux_vectorOp.c
+  ../pitch/vector/flux_vectorInt.c
+  )
 
-# Add a header directory
-include_directories(examples)
-include_directories(./lib/Config)
-include_directories(./lib/GUI)
-include_directories(./lib/Icm20948)
-include_directories(./lib/LCD)
-include_directories(./lib/Infrared)
+# Add a compilation subdirectory
+include_directories(
+  ../pitch
+  ../pitch/dsp 
+  ../pitch/util 
+  ../pitch/vector)
 
 if (CMAKE_C_COMPILER_ID STREQUAL "GNU")
     add_compile_options(-Wno-maybe-uninitialized)
 endif()
-
-# Add executable. Default name is the project name, version 0.1
-
-add_executable(main 
-  main.c
-  fedge.c
-  fdetect.c
-  ../util/accur.c
-  ../util/alpha.c
-  ../util/limit.c)
-
-include_directories(../util)
 
 pico_set_program_name(main "main")
 pico_set_program_version(main "0.1")
@@ -68,7 +61,12 @@ pico_enable_stdio_uart(main 1)
 pico_enable_stdio_usb(main 0)
 
 # Add the standard library to the build
-target_link_libraries(main pico_stdlib pico_multicore LCD Infrared Icm20948 GUI Fonts Config hardware_spi)
+# Add the standard library to the build
+target_link_libraries(
+  main
+  pico_stdlib
+  hardware_adc
+  hardware_dma)
 
 # Add the standard include files to the build
 target_include_directories(main PRIVATE
