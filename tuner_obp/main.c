@@ -7,7 +7,7 @@
  *  - ouptuts to console 
  * 
  * @note  It is assumed that the input signal is analogicaly filtered 
- * with an 8 poles low pass filter that is set with a 1 KHz cut off frequency. 
+ * with an 8 poles low pass filter that is set with a 500 KHz cut off frequency. 
  *
  * @author Vincent Lacasse
  * @date   2025-05-20
@@ -52,16 +52,18 @@ void toggle_led()
 #define SAMPLING_FREQ   (1000000/TIMER_US)
 
 #define LOW_FREQ        35    // Hz
-#define HIGH_FREQ       500   // Hz
+#define HIGH_FREQ       600   // Hz
 #define LOW_PERIOD      (SAMPLING_FREQ/HIGH_FREQ-1)
 #define HIGH_PERIOD     (SAMPLING_FREQ/LOW_FREQ+1)
 
-#define SIGNAL_LENGTH   1024    // SIGNAL_LENGTH should be a power of 2 greater than HIGH_INDEX*2
-#if SIGNAL_LENGTH < HIGH_INDEX*2
+#define SIGNAL_LENGTH   1024    // SIGNAL_LENGTH should be a power of 2 greater than HIGH_PERIOD*2
+#if SIGNAL_LENGTH < HIGH_PERIOD*2
     #error SIGNAL_LENGTH must be greater than HIGH_INDEX*2
 #endif
 #define BIT_PER_WORD    32
 #define BIT_ARRAY_SIZE  (SIGNAL_LENGTH/BIT_PER_WORD)	
+
+#define THRESHOLD       (SIGNAL_LENGTH/50)
 
 
 static uint32_t bit_array[BIT_ARRAY_SIZE];
@@ -114,9 +116,10 @@ void print_bit_array(uint32_t *bit_array)
 
 void shift_bit_array(uint32_t *bit_array)
 {
-	for (int i = 0; i < BIT_ARRAY_SIZE; i++) {
+	for (int i = 0; i < BIT_ARRAY_SIZE-1; i++) {
 		bit_array[i] = (bit_array[i] >> 1) | (bit_array[i + 1] << (BIT_PER_WORD - 1));
 	}
+    bit_array[BIT_ARRAY_SIZE-1] = bit_array[BIT_ARRAY_SIZE] >> 1;   
 }
 
 void xor_bit_arrays(uint32_t *bit_array1_in, uint32_t *bit_array2_in, uint32_t *bit_array1_out)
@@ -175,7 +178,7 @@ void auto_diff_corr(uint32_t *bit_array, uint32_t *acorr_array, int length)
     uint32_t shifted_bit_array[BIT_ARRAY_SIZE];
     uint32_t result_bit_array[BIT_ARRAY_SIZE];
 
-    memcpy(shift_bit_array, bit_array, sizeof(shift_bit_array));
+    memcpy(shifted_bit_array, bit_array, BIT_ARRAY_SIZE*sizeof(uint32_t));
 
     for (int i = 0; i < length; i++) {
         xor_bit_arrays(bit_array, shifted_bit_array, result_bit_array);
@@ -184,26 +187,26 @@ void auto_diff_corr(uint32_t *bit_array, uint32_t *acorr_array, int length)
     }
 }
 
-int find_min_index(uint32_t *array, int length, int start_index)
+int find_first_min_index(uint32_t *array, int length, int start_index)
 {
-    int min = UINT32_MAX;
-    int imin = -1;
+    if (start_index == 0) start_index = 1;
 
     for (int i = start_index; i < length; i++) {
-        if (min > array[i]) {
-            min = array[i];
-            imin = i;
+        if (array[i-1] >= array[i] && 
+            array[i] <= array[i+1] &&
+            array[i] <= THRESHOLD) {
+            return i;
         }
     }
-    return imin;
+    return 0;
 }
 
 
 int main() {
     // double frequency;
     // int status;
-    // uint32_t start_time = 0;
-    // uint32_t elapsed_time, now;
+    uint32_t start_time = 0;
+    uint32_t elapsed_time, now;
     // uint32_t timestamp = 0;
 
     // initialize printing to console
@@ -229,14 +232,19 @@ int main() {
 
         cancel_repeating_timer(&timer);
 
+        // print_bit_array(bit_array);
         auto_diff_corr(bit_array, acorr_array, HIGH_PERIOD);
-        int index = find_min_index(acorr_array, HIGH_PERIOD, LOW_PERIOD);
-        printf("i: %d\n", index);
+        int index = find_first_min_index(acorr_array, HIGH_PERIOD, LOW_PERIOD);
 
-        // to be removed
-        // now = time_us_32();
-        // elapsed_time =  now - start_time;
-        // start_time = now;
+        now = time_us_32();
+        elapsed_time =  now - start_time;
+        start_time = now;
+        printf("i: %d  et: %ld\n", index, elapsed_time);
+
+        
+        memset(bit_array, 0, sizeof(bit_array));
+        done = false;
+        add_repeating_timer_us(-TIMER_US, repeating_timer_callback, NULL, &timer);
     }
 
 }
