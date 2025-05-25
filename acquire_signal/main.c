@@ -31,12 +31,18 @@
 
 // Channel 0 is GPIO26
 #define CAPTURE_CHANNEL 0
-#define CAPTURE_DEPTH 1024
+#define CAPTURE_DEPTH   (31*1024)  // 3 sec approx
 
 uint16_t capture_buf[CAPTURE_DEPTH];
 
 int main() {
     stdio_init_all();
+    sleep_ms(10000);
+    printf("0");
+    sleep_ms(1000);
+    printf("0");
+    sleep_ms(1000);
+    printf("0");
 
     // Init GPIO for analogue use: hi-Z, no pulls, disable digital input buffer.
     adc_gpio_init(26 + CAPTURE_CHANNEL);
@@ -91,6 +97,6 @@ int main() {
 
     // Print samples to stdout so you can display them in pyplot, excel, matlab
     for (int i = 0; i < CAPTURE_DEPTH; ++i) {
-        printf(" %-3d\n", capture_buf[i]);
+        printf("%3d\n", capture_buf[i]);
     }
 }
