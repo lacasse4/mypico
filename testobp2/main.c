@@ -21,7 +21,11 @@
 #define BIT_PER_WORD    32
 #define BIT_ARRAY_SIZE  (WINDOW_LENGTH/BIT_PER_WORD)	
 
-#define AC_THRESHOLD    (WINDOW_LENGTH/50)
+#define AC_HIGH_THRES1  (WINDOW_LENGTH/11)
+#define AC_LOW_THRES1   0.25
+#define AC_HIGH_THRES2  (WINDOW_LENGTH/8)
+#define AC_LOW_THRES2   (WINDOW_LENGTH/32)
+
 #define BIT_THRESHOLD   (WINDOW_LENGTH/5)
 
 // #define SIGNAL_LENGTH   (31*1024) // 3 seconds of data
@@ -163,6 +167,7 @@ void auto_diff_corr(uint32_t *bit_array_in, uint16_t *acorr_array_out, int lengt
 #define FLAT 2
 #define ASCENDING 3
 
+/*
 float find_first_min_index(uint16_t *array_in, int length, int start_index)
 {
     int state = 0;
@@ -200,7 +205,114 @@ float find_first_min_index(uint16_t *array_in, int length, int start_index)
     }
     return 0.0;
 }
+*/
 
+
+int find_next_max(uint16_t *array_in, int length, int start_index)
+{
+    for (int i = start_index; i < length - 1; i++) {
+        if (array_in[i] > array_in[i + 1]) {
+            return i;
+        }
+    }
+    return -1; // no maximum found
+}
+
+int find_next_min(uint16_t *array_in, int length, int start_index)
+{
+    for (int i = start_index; i < length - 1; i++) {
+        if (array_in[i] < array_in[i + 1]) {
+            return i;
+        }
+    }
+    return -1; // no minimum found
+}
+
+#define GAP 20 // minimum gap between peaks in samples
+float get_F0_period(uint16_t *array_in, int length, int start_index)
+{
+    int imax1 = find_next_max(array_in, length, start_index);
+    uint16_t max1_value = array_in[imax1];
+    printf("| i: %3d ", imax1);
+    printf("v: %3u | ", max1_value);
+    if (max1_value < AC_HIGH_THRES1) return 0.0; // maximum too low
+    if (imax1 < 0) return 0.0; // no maximum found
+
+    int imin1 = find_next_min(array_in, length, imax1 + GAP);
+    printf("i: %3d ", imin1);
+    printf("v: %3u | ", array_in[imin1]);
+    if (array_in[imin1] > AC_LOW_THRES1*max1_value) return 0.0; // minimum too high
+    if (imin1 < 0) return 0.0; // no minimum found
+
+    int imax2 = find_next_max(array_in, length, imin1 + GAP);
+    printf("i: %3d ", imax2);
+    printf("v: %3u | ", array_in[imax2]);
+    if (array_in[imax2] < AC_HIGH_THRES2) return 0.0; // second maximum too low
+    if (imax2 < 0) return 0.0; // no second maximum found
+
+    int imin2 = find_next_min(array_in, length, imax2 + GAP);
+    printf("i: %3d ", imin2);
+    printf("v: %3u | ", array_in[imin2]);
+    if (array_in[imin2] > AC_LOW_THRES2) return 0.0; // minimum after second maximum too high
+    if (imin2 < 0) return 0.0; // no minimum found after second maximum
+    return imin2;
+}
+
+int find_max(uint16_t *array_in, int length, int start_index)
+{
+    int imax = -1;
+    uint16_t max_value = 0;
+    for (int i = start_index; i < length; i++) {
+        if (array_in[i] > max_value) {
+            max_value = array_in[i];
+            imax = i;
+        }
+    }
+    return imax;
+}
+
+int find_min(uint16_t *array_in, int length, int start_index)
+{
+    int imin = -1;
+    uint16_t min_value = UINT16_MAX;
+    for (int i = start_index; i < length; i++) {
+        if (array_in[i] < min_value) {
+            min_value = array_in[i];
+            imin = i;
+        }
+    }
+    return imin;
+}
+
+int find_first_min_bellow(uint16_t *array_in, int length, int start_index, uint16_t threshold)
+{
+    for (int i = start_index; i < length - 1; i++) {
+        if (array_in[i] > threshold) {
+            continue; // skip values above threshold
+        }
+        if (array_in[i] < array_in[i + 1]) {
+            return i;
+        }
+    }
+    return -1; // no minimum found
+}
+
+float get_F0_period2(uint16_t *array_in, int length, int start_index)
+{
+    int imax = find_next_max(array_in, length, start_index);
+    if (imax < 0) return 0.0; // no maximum found
+    int max_value = array_in[imax];
+
+    int imin1 = find_first_min_bellow(array_in, length, imax+GAP, max_value * AC_LOW_THRES1);
+    if (imin1 < 0) return 0.0; // no minimum found below threshold
+    int min1_value = array_in[imin1];
+
+    int imin2 = find_first_min_bellow(array_in, length, imin1+GAP, max_value * AC_LOW_THRES1);
+    if (imin2 < 0) return (float)imin1; // no second minimum found below threshold
+    int min2_value = array_in[imin2];
+    if (min2_value < min1_value) return (float)imin2; 
+    return (float)imin1; // return the first minimum if the second is not lower
+}
 
 /*
 bool find_min_peaks(uint16_t *array_in, int length, int start_index, float *peak_list_out, int *peak_count)
@@ -275,15 +387,35 @@ int read_signal_file(const char *filename, uint16_t  *array_out, int length)
 }
 
 char *file_names[6] = {
-    "E2.cap",
-    "A2.cap",
-    "D3.cap",
-    "G3.cap",
-    "B3.cap",
-    "E4.cap"
+    "/Users/vincent/Documents/data/E2.cap",
+    "/Users/vincent/Documents/data/A2.cap",
+    "/Users/vincent/Documents/data/D3.cap",
+    "/Users/vincent/Documents/data/G3.cap",
+    "/Users/vincent/Documents/data/B3.cap",
+    "/Users/vincent/Documents/data/E4.cap"
+};
+
+char *file_names_out[6] = {
+    "/Users/vincent/Documents/data/E2acorr.cap",
+    "/Users/vincent/Documents/data/A2acorr.cap",
+    "/Users/vincent/Documents/data/D3acorr.cap",
+    "/Users/vincent/Documents/data/G3acorr.cap",
+    "/Users/vincent/Documents/data/B3acorr.cap",
+    "/Users/vincent/Documents/data/E4acorr.cap"
+};
+
+
+float periods[6][2] = {
+    82.41, // E2
+    110.00, // A2
+    146.83, // D3
+    196.00, // G3
+    246.94, // B3
+    329.63  // E4
 };
 
 int main() {
+    FILE *file;
     static uint16_t signal_array_in[SIGNAL_LENGTH];
     static int16_t  signal_array_unbiased[SIGNAL_LENGTH];
     static uint32_t bit_array[BIT_ARRAY_SIZE];
@@ -298,15 +430,30 @@ int main() {
             printf("Error reading file %s\n", file_names[i]);
             return -1;
         }
+        file = fopen(file_names_out[i], "w");
+        if (file == NULL) {
+            printf("Error opening file %s for writing\n", file_names[i]);
+            return -1;
+        }
 
         remove_signal_offset(signal_array_in, signal_array_unbiased, SIGNAL_LENGTH);
         
         for (int j = 0; j < N_SLICES; j++) {
+
+            printf("s: %3d j: %3d ", i+1, j);
+
             int start = j * SLICE;
             memcpy(signal_slice, signal_array_unbiased + start, WINDOW_LENGTH * sizeof(int16_t));
             bool is_ok = convert_signal_to_bit(signal_slice, bit_array);
             auto_diff_corr(bit_array, acorr_array, HIGH_PERIOD);
-            float index = find_first_min_index(acorr_array, HIGH_PERIOD, LOW_PERIOD);
+
+            for (int k = 0; k < HIGH_PERIOD; k++) {
+                fprintf(file, "%5u ", acorr_array[k]);
+            }
+            fprintf(file, "\n");
+            
+            // float index = find_first_min_index(acorr_array, HIGH_PERIOD, LOW_PERIOD);
+            float index = get_F0_period2(acorr_array, HIGH_PERIOD, LOW_PERIOD);
             float frequency;
             if (!is_ok || index == 0) {
                 frequency = 0;
@@ -314,7 +461,10 @@ int main() {
                 frequency = (float)SAMPLING_FREQ / index; 
             }
 
-            printf("string: %1d  start: %5d  freq: %7.3f\n", i+1, start, frequency);
+            printf("i: %5.1f f: %6.2f ", index, frequency);
+            printf("\n");
+
         }
+        fclose(file);
     }
 }
