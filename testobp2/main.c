@@ -366,6 +366,17 @@ bool find_min_peaks(uint16_t *array_in, int length, int start_index, float *peak
 }
 */
 
+float get_signal_slope(uint16_t *array_in, int length)
+{
+    if (length <= 1) return 0.0;
+
+    int sum = 0;
+    for (int i = 1; i < length; i++) {
+        sum += (int)array_in[i] - (int)array_in[i - 1];
+    }
+    return (float)sum / (length - 1);
+}
+
 int read_signal_file(const char *filename, uint16_t  *array_out, int length)
 {
     int status;
@@ -461,7 +472,8 @@ int main() {
                 frequency = (float)SAMPLING_FREQ / index; 
             }
 
-            printf("i: %5.1f f: %6.2f ", index, frequency);
+            float slope = get_signal_slope(acorr_array, 3);
+            printf("i: %5.1f f: %6.2f sl: %6.2f", index, frequency, slope);
             printf("\n");
 
         }
